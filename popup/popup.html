@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h3>AI文本检测器 (Ollama)</h3>
+    
+    <div class="settings">
+      <div class="setting-item">
+        <label for="ollamaUrl">Ollama地址:</label>
+        <input type="text" id="ollamaUrl" value="http://localhost:11434" placeholder="http://localhost:11434">
+      </div>
+      <div class="setting-item">
+        <label for="ollamaModel">模型名称:</label>
+        <input type="text" id="ollamaModel" value="llama2" placeholder="llama2">
+      </div>
+    </div>
+
+    <div class="button-group">
+      <button id="testConnectionBtn" class="btn-secondary">测试连接</button>
+      <button id="detectBtn" class="btn-primary">检测当前页面</button>
+      <button id="clearBtn" class="btn-secondary">清除结果</button>
+    </div>
+    
+    <div id="connectionStatus" class="connection-status hidden">
+      <span class="status-icon">🔴</span>
+      <span class="status-text">未连接</span>
+    </div>
+
+    <div id="loading" class="loading hidden">
+      <div class="spinner"></div>
+      <span>分析中...</span>
+    </div>
+
+    <div id="result" class="result hidden">
+      <div class="result-header">
+        <h4>Ollama分析结果</h4>
+        <span id="confidenceBadge" class="confidence-badge"></span>
+      </div>
+      <div id="resultContent"></div>
+      <div class="analysis-details">
+        <h5>详细分析:</h5>
+        <div id="analysisDetails"></div>
+      </div>
+    </div>
+
+    <div id="error" class="error hidden">
+      <p>❌ 操作失败</p>
+      <div id="errorDetails" class="error-details"></div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
