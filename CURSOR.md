@@ -1,0 +1,79 @@
+# 项目概览
+
+本仓库为 Chrome 扩展：`Ollama Chrome Assistant`，用于通过本地 Ollama 服务与大模型进行对话。
+
+主要文件：
+- `popup.html` / `popup.css` / `popup.js`：弹出窗口 UI 与前端逻辑
+- `background.js`：Service Worker，负责与 Ollama API 通信
+- `manifest.json`：扩展清单
+
+技术栈与运行环境：
+- Chrome 扩展（Manifest V3）
+- 本地 Ollama 服务（默认 http://localhost:11434）
+- 仅使用浏览器内置 API（chrome.runtime、chrome.storage）
+
+运行与调试要点：
+- 确保 Ollama 服务运行并能通过 `http://localhost:11434/api/tags` 返回模型列表
+- 扩展需要 `host_permissions` 指定 Ollama 地址（manifest.json 已包含 `http://localhost:11434/*`）
+- 在开发中使用 `chrome://extensions/` 加载未打包扩展并打开弹出窗口的控制台查看日志
+
+
+# 本次问题诊断（简要）
+
+问题描述：
+- 在弹出窗口发送消息时，背景脚本向 `http://localhost:11434/api/generate` 发送请求返回 403，导致消息发送失败。
+
+关键调试输出：
+- 选择模型: `qwen3:8b`
+- 发送消息: `你好`
+- 后台日志显示请求发送到 `http://localhost:11434/api/generate`，返回状态码 403。
+
+分析结论：
+- Ollama 默认会拒绝来自浏览器扩展/非受信任 origin 的请求。需要通过设置环境变量 `OLLAMA_ORIGINS` 允许扩展 origin（例如 `chrome-extension://*`）。
+
+
+# 我所做的修改（实现与理由）
+
+1. 在 `popup.js` 中添加调试日志，输出当前选择的模型与发送的消息，便于定位请求参数：
+   - 目的：验证模型名称与前端传入的请求体是否正确。
+
+2. 在 `background.js` 中添加更多日志，并调整与 Ollama 的请求处理：
+   - 原先使用流式（stream: true）在扩展环境中可能不稳定或触发服务器拒绝，临时改为非流式请求（stream: false）以便稳定获取完整 JSON 响应。
+   - 增加对错误响应体的打印，便于诊断服务器返回的详细原因。
+   - 曾尝试过用 XMLHttpRequest，后回退为标准 fetch 并记录响应头与响应体。
+
+3. 文档：
+   - （本文件）记录诊断过程与最终结论。
+
+
+# 操作建议（用户侧）
+
+1. 启动 Ollama 时允许扩展 origin（必需）：
+   - Windows PowerShell：
+     ```powershell
+     $env:OLLAMA_ORIGINS = "chrome-extension://*"
+     ollama serve
+     ```
+   - 或使用批处理文件：
+     ```batch
+     @echo off
+     set OLLAMA_ORIGINS=chrome-extension://*
+     ollama serve
+     ```
+
+2. 重新加载扩展并在 popup 控制台查看日志：
+   - 打开 `chrome://extensions/`，点击扩展右下角刷新按钮
+   - 打开插件弹出页面并在开发者工具 Console 查看日志
+
+
+# 变更记录
+
+- 2025-09-30 09:00:00 - 添加调试日志到 `popup.js`，记录模型与消息
+- 2025-09-30 09:10:00 - 修改 `background.js`：切换为非流式请求，增加错误输出，最后恢复为 `fetch` 并打印响应头
+- 2025-09-30 09:25:00 - 尝试使用 `XMLHttpRequest`（已回退），最终使用 `fetch` 并记录必要日志
+
+
+# 未完成/需确认项
+
+- 是否接受使用非流式请求的方案（若需要流式响应，需进一步实现 Chrome 扩展对 NDJSON 流的兼容处理或使用外部代理）
+- 是否将 `CURSOR.md` 与 `README` 同步为中英文版本（我将根据用户指示继续更新 README）
