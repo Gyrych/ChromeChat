@@ -56,7 +56,9 @@ body {
 .model-selector {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    /* keep controls compact and prevent wrapping */
+    flex-wrap: nowrap;
 }
 
 .model-selector select {
@@ -65,6 +67,92 @@ body {
     border-radius: 4px;
     font-size: 12px;
 }
+
+#sessionSelect, #modelSelect {
+    max-width: 150px;
+    min-width: 110px;
+}
+
+/* 会话选择与管理按钮在同一行显示，适当压缩间距 */
+#sessionSelect {
+    max-width: 140px;
+}
+
+.session-group {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.session-menu {
+    position: absolute;
+    right: 0;
+    top: 28px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 4px;
+    display: flex;
+    gap: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    z-index: 10;
+}
+
+.session-menu.hidden {
+    display: none;
+}
+
+.menu-item {
+    background: #f9f9f9;
+    border: 1px solid #e5e5e5;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+
+.menu-item:hover {
+    background: #eee;
+}
+
+.session-list {
+    position: absolute;
+    right: 8px;
+    top: 36px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+    z-index: 50;
+    min-width: 260px;
+    max-height: 300px;
+    overflow: auto;
+}
+
+.session-list.hidden { display: none; }
+
+.session-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 6px;
+}
+
+.session-item:hover { background: #fbfbfb; }
+
+.session-item .item-controls { display: flex; gap: 6px; }
+
+.session-icon-btn { background: none; border: none; cursor: pointer; font-size: 13px; padding: 2px; }
+
+.session-item div { overflow: hidden; }
+.session-item div:first-child { text-overflow: ellipsis; white-space: nowrap; }
 
 .icon-btn {
     background: none;

@@ -15,6 +15,15 @@
                 <span id="statusText">未连接</span>
             </div>
             <div class="model-selector">
+                <select id="sessionSelect" style="display:none;">
+                    <option value="">选择会话...</option>
+                </select>
+                <div class="session-group">
+                    <button id="currentSessionBtn" class="btn secondary">会话</button>
+                    <div id="sessionListPanel" class="session-list hidden">
+                        <!-- 会话条目将由脚本动态渲染 -->
+                    </div>
+                </div>
                 <select id="modelSelect">
                     <option value="">选择模型...</option>
                 </select>

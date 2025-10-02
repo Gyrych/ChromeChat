@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "description": "与本地Ollama大模型对话的Chrome插件",
   "permissions": [
-    "storage"
+    "storage",
+    "unlimitedStorage"
   ],
   "action": {
     "default_popup": "popup.html",
