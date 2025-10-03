@@ -190,8 +190,21 @@ class OllamaAssistant {
         this.addMessage('user', message);
         this.messageInput.value = '';
 
-        // 添加加载中的助手消息
+        // 添加加载中的助手消息（DOM）并在会话中创建占位以实现自动保存
         this.currentMessageId = this.addMessage('assistant', '思考中...', true);
+        try {
+            // 在会话中追加一个占位的助手消息（内容为空），以便后续更新时能保存到会话
+            await this.appendMessageToActiveSession({ role: 'assistant', content: '' });
+            // 将该会话消息的时间戳映射到 DOM 元素，便于后续更新时定位并保存
+            const session = await this.loadSession(this.activeSessionId);
+            if (session && Array.isArray(session.messages) && session.messages.length) {
+                const last = session.messages[session.messages.length - 1];
+                const el = document.getElementById(this.currentMessageId);
+                if (el && last) el.dataset.sessionTs = String(last.ts);
+            }
+        } catch (e) {
+            console.warn('创建助手占位并保存到会话失败:', e);
+        }
 
         try {
             // 将用户消息追加到会话并持久化（先写入，失败也能回顾）
@@ -217,23 +230,66 @@ class OllamaAssistant {
         }
     }
 
-    handleStreamUpdate(request) {
+    async handleStreamUpdate(request) {
         if (request.chunk && this.currentMessageId) {
             this.updateMessageContent(this.currentMessageId, request.chunk);
         }
 
         if (request.done) {
             if (request.fullResponse) {
-                // 写入会话并自动保存
-                this.appendMessageToActiveSession({ role: 'assistant', content: request.fullResponse })
-                    .then(async () => {
-                        await this.refreshSessionTimestamps();
-                        // 自动保存完成后，保持当前UI消息显示，不做额外清空
-                    })
-                    .catch((e) => console.error('保存助手消息失败:', e));
+                try {
+                    // 优先尝试根据 DOM 元素上记录的 sessionTs 更新会话中对应的占位消息，实现自动保存
+                    const el = document.getElementById(this.currentMessageId);
+                    const sessionTs = el ? el.dataset.sessionTs : null;
+                    if (sessionTs) {
+                        await this.updateSessionMessageByTs(Number(sessionTs), request.fullResponse);
+                    } else {
+                        // fallback：找最后一条空内容的 assistant 消息并更新
+                        await this.updateLastAssistantPlaceholder(request.fullResponse);
+                    }
+                    await this.refreshSessionTimestamps();
+                } catch (e) {
+                    console.error('保存助手消息失败:', e);
+                    // 若更新失败，退回到追加行为以确保会话中至少有完整的回答
+                    try { await this.appendMessageToActiveSession({ role: 'assistant', content: request.fullResponse }); } catch (err) { console.error('append fallback failed:', err); }
+                }
             }
             this.currentMessageId = null;
         }
+    }
+
+    // 根据时间戳更新会话中对应消息的内容并保存
+    async updateSessionMessageByTs(ts, newContent) {
+        if (!this.activeSessionId) await this.ensureActiveSession();
+        const session = await this.loadSession(this.activeSessionId);
+        if (!session || !Array.isArray(session.messages)) return;
+        const idx = session.messages.findIndex(m => m.ts === ts && m.role === 'assistant');
+        if (idx !== -1) {
+            session.messages[idx].content = newContent;
+            session.messages[idx].ts = session.messages[idx].ts || Date.now();
+            await this.saveSession(session);
+            return;
+        }
+        // 若未找到匹配项则抛出以触发 fallback
+        throw new Error('未找到匹配的会话消息用于更新');
+    }
+
+    // 回退方案：更新最后一条空占位的 assistant 消息
+    async updateLastAssistantPlaceholder(newContent) {
+        if (!this.activeSessionId) await this.ensureActiveSession();
+        const session = await this.loadSession(this.activeSessionId);
+        if (!session || !Array.isArray(session.messages)) return;
+        for (let i = session.messages.length - 1; i >= 0; i--) {
+            const m = session.messages[i];
+            if (m.role === 'assistant' && (!m.content || m.content === '')) {
+                session.messages[i].content = newContent;
+                session.messages[i].ts = session.messages[i].ts || Date.now();
+                await this.saveSession(session);
+                return;
+            }
+        }
+        // 若仍找不到，则追加一条
+        await this.appendMessageToActiveSession({ role: 'assistant', content: newContent });
     }
 
     handleStreamError(request) {
@@ -289,6 +345,9 @@ class OllamaAssistant {
         const messageId = 'msg_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
         messageDiv.id = messageId;
         messageDiv.className = `message ${role} ${isTemp ? 'loading' : ''}`;
+        // 为了支持 Markdown 渲染与流式追加，辅以原始内容缓存
+        messageDiv.dataset.raw = content || '';
+        // 初始渲染为纯文本以避免 XSS，后续会使用 renderMessageHtml 受控转换
         messageDiv.textContent = content;
 
         this.messagesDiv.appendChild(messageDiv);
@@ -324,13 +383,14 @@ class OllamaAssistant {
         // 移除"加载中"样式
         messageElement.classList.remove('loading');
 
-        // 追加新内容或替换初始占位文本
-        const currentContent = messageElement.textContent;
-        if (currentContent === '思考中...') {
-            messageElement.textContent = newContent;
-        } else {
-            messageElement.textContent += newContent;
-        }
+        // 使用 data-raw 缓存完整原始文本以便最终渲染为 HTML
+        const prevRaw = messageElement.dataset.raw || '';
+        const updatedRaw = prevRaw === '思考中...' ? newContent : (prevRaw + newContent);
+        messageElement.dataset.raw = updatedRaw;
+
+        // 先以纯文本追加，最后由 renderMessageHtml 进行受控的 Markdown -> HTML 转换
+        // 这里我们直接调用渲染函数以便即时显示格式化内容
+        messageElement.innerHTML = renderMessageHtml(updatedRaw);
         this.scrollToBottom();
     }
 
@@ -750,6 +810,67 @@ class OllamaAssistant {
         a.click();
         URL.revokeObjectURL(url);
     }
+}
+
+// 简单安全的 Markdown 渲染器（支持代码块、行内代码、加粗、斜体、链接、换行与列表）
+// 注意：出于安全考虑，这个实现只处理有限的 Markdown 语法并对文本进行转义以避免 XSS
+function escapeHtml(str) {
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderMessageHtml(raw) {
+    if (!raw) return '';
+    // 处理代码块 ``` ```
+    let s = raw;
+    // 临时占位用以避免后续替换影响代码块内容
+    const codeBlocks = [];
+    s = s.replace(/```([\s\S]*?)```/g, function(_, code) {
+        codeBlocks.push(code);
+        return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+    });
+
+    // 转义 HTML
+    s = escapeHtml(s);
+
+    // 恢复代码块为带 <pre><code>
+    s = s.replace(/__CODE_BLOCK_(\d+)__/g, function(_, idx) {
+        const code = escapeHtml(codeBlocks[Number(idx)] || '');
+        return `<pre><code>${code}</code></pre>`;
+    });
+
+    // 行内代码 `code`
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // 加粗 **text** 和 斜体 *text*
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+    // 链接 [text](url)
+    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
+        const safeUrl = escapeHtml(url);
+        return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    });
+
+    // 无序列表 - 前置换成 <ul><li>
+    // 先处理每行
+    const lines = s.split(/\r?\n/);
+    let inList = false;
+    const out = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const m = line.match(/^\s*[-*+]\s+(.*)$/);
+        if (m) {
+            if (!inList) { out.push('<ul>'); inList = true; }
+            out.push(`<li>${m[1]}</li>`);
+        } else {
+            if (inList) { out.push('</ul>'); inList = false; }
+            // 普通段落，保留换行
+            if (line.trim() === '') out.push('<br>'); else out.push(`<p>${line}</p>`);
+        }
+    }
+    if (inList) out.push('</ul>');
+
+    return out.join('');
 }
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -41,6 +41,11 @@ body {
     display: inline-block;
 }
 
+/* 隐藏连接状态的文字，只保留指示器 */
+.connection-status #statusText {
+    display: none;
+}
+
 .status-indicator.connected {
     background-color: #4CAF50;
 }
