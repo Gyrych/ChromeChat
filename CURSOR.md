@@ -121,3 +121,14 @@
 
 - 是否接受使用非流式请求的方案（若需要流式响应，需进一步实现 Chrome 扩展对 NDJSON 流的兼容处理或使用外部代理）
 - 是否将 `CURSOR.md` 与 `README` 同步为中英文版本（我将根据用户指示继续更新 README）
+
+## 变更记录（自动追加）
+
+- 2025-10-03 13:00:00 - 修复 `popup.js` 中 `sendMessage` 的持久化顺序问题：
+  - 问题：原实现先将 assistant 占位写入会话再写 user，导致会话内消息顺序不正确（assistant 在 user 之前）。
+  - 变更：调整为在持久化层面先 append user，再 append assistant 占位；UI 渲染仍保持先展示 user 并显示 assistant 占位。相关文件：`popup.js`。
+  - 目的：保证会话中消息顺序为 user -> assistant，避免上下文构建时顺序错误。
+
+- 2025-10-03 13:05:00 - 添加内存级写锁以防止 session index 与单个会话并发写入竞态：
+  - 变更：在 `popup.js` 中增加 `_sessionLocks` 结构与 `_acquireSessionLock` 方法，并在 `saveSession`、`saveSessionIndex`、`createSession`、`deleteSession` 中使用锁保护读写。
+  - 目的：避免并发创建/删除/保存会话时导致索引或会话数据不一致的问题。

@@ -14,6 +14,8 @@ class OllamaAssistant {
         this.sessionKeyPrefix = 'ollama.session.';
         this.activeSessionId = null;
         this.maxMessagesToKeep = 20; // 简易上下文截断策略：仅保留最近N条
+        // 简单的内存级写锁，用于避免对 session index 与单个 session 的并发写入竞态
+        this._sessionLocks = {}; // { [sessionId]: Promise }
 
         this.initializeElements();
         this.loadSettings();
@@ -31,7 +33,8 @@ class OllamaAssistant {
         this.modelSelect = document.getElementById('modelSelect');
 
         // 会话选择与管理
-        this.sessionSelect = document.getElementById('sessionSelect');
+        // 已移除原生 sessionSelect，下方 UI 使用 sessionListPanel 管理会话
+        this.sessionSelect = null;
         this.newSessionBtn = null;
         this.currentSessionBtn = document.getElementById('currentSessionBtn');
         this.currentSessionText = document.getElementById('currentSessionText');
@@ -108,8 +111,10 @@ class OllamaAssistant {
         this.clearChatBtn.addEventListener('click', () => this.handleClearConversation());
 
         // 会话管理事件
-        this.sessionSelect.addEventListener('change', () => this.handleSessionSwitch());
-        this.currentSessionBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleSessionMenu(e); });
+        // 原生下拉已移除，保留该逻辑注释以便将来需要时恢复
+        // this.sessionSelect.addEventListener('change', () => this.handleSessionSwitch());
+        // 点击当前会话按钮显示会话列表面板（非操作菜单）
+        this.currentSessionBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleSessionList(); });
         document.addEventListener('click', (e) => this.handleGlobalClickForMenus(e));
     }
 
@@ -195,29 +200,27 @@ class OllamaAssistant {
         this.addMessage('user', message);
         this.messageInput.value = '';
 
-        // 添加加载中的助手消息（DOM）并在会话中创建占位以实现自动保存
+        // 先在 UI 中显示助手占位
         this.currentMessageId = this.addMessage('assistant', '思考中...', true);
+
         try {
+            // 先将用户消息追加到会话并持久化（保持会话内顺序为 user -> assistant）
+            await this.appendMessageToActiveSession({ role: 'user', content: message });
+
             // 在会话中追加一个占位的助手消息（内容为空），以便后续更新时能保存到会话
             await this.appendMessageToActiveSession({ role: 'assistant', content: '' });
-            // 将该会话消息的时间戳映射到 DOM 元素，便于后续更新时定位并保存
+
+            // 将该会话消息的时间戳映射到 DOM 元素，便于后续更新时定位并保存（读取最后一条消息的 ts）
             const session = await this.loadSession(this.activeSessionId);
             if (session && Array.isArray(session.messages) && session.messages.length) {
                 const last = session.messages[session.messages.length - 1];
                 const el = document.getElementById(this.currentMessageId);
                 if (el && last) el.dataset.sessionTs = String(last.ts);
             }
-        } catch (e) {
-            console.warn('创建助手占位并保存到会话失败:', e);
-        }
-
-        try {
-            // 将用户消息追加到会话并持久化（先写入，失败也能回顾）
-            await this.appendMessageToActiveSession({ role: 'user', content: message });
 
             // 组装上下文（截断最近 N 条）
-            const session = await this.loadSession(this.activeSessionId);
-            const messagesForChat = this.buildMessagesForChat(session.messages);
+            const sessionForChat = await this.loadSession(this.activeSessionId);
+            const messagesForChat = this.buildMessagesForChat(sessionForChat.messages);
 
             const response = await this.sendMessageToBackground('sendChat', {
                 url: this.settings.ollamaUrl,
@@ -228,11 +231,13 @@ class OllamaAssistant {
             if (!response || !response.success) {
                 throw new Error((response && response.message) ? response.message : '后台无响应');
             }
-            // 流式响应将通过message listener处理
+            // 流式响应将通过 message listener 处理并在完成时更新会话中的占位消息
         } catch (error) {
             console.error('发送消息失败:', error);
+            // 移除占位 DOM 并显示错误气泡
             this.removeMessage(this.currentMessageId);
             this.addMessage('assistant', `错误: ${error.message}`);
+            this.currentMessageId = null;
         }
     }
 
@@ -464,7 +469,20 @@ class OllamaAssistant {
         return index;
     }
 
+    // 获取一个基于 sessionId 锁的 Promise 队列入口
+    async _acquireSessionLock(sessionId) {
+        const key = sessionId || '__index__';
+        const prev = this._sessionLocks[key] || Promise.resolve();
+        let release;
+        const p = new Promise((resolve) => { release = resolve; });
+        // 新的锁链由 prev.then(() => p)
+        this._sessionLocks[key] = prev.then(() => p);
+        // 返回释放函数，调用后允许下一个等待者继续
+        return () => { release(); };
+    }
+
     async saveSessionIndex(index) {
+        // 直接写入索引（调用方应在需要时获取索引锁以保证原子性）
         await chrome.storage.local.set({ [this.sessionIndexKey]: index });
     }
 
@@ -477,27 +495,49 @@ class OllamaAssistant {
     async saveSession(session) {
         const key = this.sessionKeyPrefix + session.id;
         session.updatedAt = Date.now();
-        await chrome.storage.local.set({ [key]: session });
+        // 使用会话级锁，确保对同一 session 的并发写入按序执行
+        const release = await this._acquireSessionLock(session.id);
+        try {
+            await chrome.storage.local.set({ [key]: session });
+        } finally {
+            release();
+        }
     }
 
     async deleteSession(id) {
         const key = this.sessionKeyPrefix + id;
-        await chrome.storage.local.remove([key]);
-        const index = await this.loadSessionIndex();
-        index.sessions = index.sessions.filter(sid => sid !== id);
-        if (index.lastActiveSessionId === id) index.lastActiveSessionId = index.sessions.length ? index.sessions[0] : null;
-        await this.saveSessionIndex(index);
+        // 使用会话锁防止删除与其他写入冲突
+        const releaseSession = await this._acquireSessionLock(id);
+        const releaseIndex = await this._acquireSessionLock();
+        try {
+            await chrome.storage.local.remove([key]);
+            const index = await this.loadSessionIndex();
+            index.sessions = index.sessions.filter(sid => sid !== id);
+            if (index.lastActiveSessionId === id) index.lastActiveSessionId = index.sessions.length ? index.sessions[0] : null;
+            await this.saveSessionIndex(index);
+        } finally {
+            releaseIndex();
+            releaseSession();
+        }
     }
 
     async createSession({ model, name }) {
         const id = this.uuid();
         const now = Date.now();
         const session = { id, name: name || this.defaultSessionName(model), model: model || '', createdAt: now, updatedAt: now, messages: [] };
-        await this.saveSession(session);
-        const index = await this.loadSessionIndex();
-        index.sessions.unshift(id);
-        index.lastActiveSessionId = id;
-        await this.saveSessionIndex(index);
+        // 为确保一致性，先获得索引锁与会话锁，再执行保存与索引更新
+        const releaseIndex = await this._acquireSessionLock();
+        const releaseSession = await this._acquireSessionLock(id);
+        try {
+            await this.saveSession(session);
+            const index = await this.loadSessionIndex();
+            index.sessions.unshift(id);
+            index.lastActiveSessionId = id;
+            await this.saveSessionIndex(index);
+        } finally {
+            releaseSession();
+            releaseIndex();
+        }
         return id;
     }
 
@@ -553,24 +593,8 @@ class OllamaAssistant {
     }
 
     async refreshSessionSelect() {
-        const index = await this.loadSessionIndex();
-        const select = this.sessionSelect;
-        if (!select) return;
-        select.innerHTML = '<option value="">选择会话...</option>';
-        for (const id of index.sessions) {
-            const session = await this.loadSession(id);
-            if (!session) continue;
-            const opt = document.createElement('option');
-            opt.value = session.id;
-            opt.textContent = session.name || session.id;
-            select.appendChild(opt);
-        }
-        if (index.lastActiveSessionId) select.value = index.lastActiveSessionId;
-        // 更新当前会话按钮文本
-        if (this.currentSessionText && index.lastActiveSessionId) {
-            const cur = await this.loadSession(index.lastActiveSessionId);
-            if (cur) this.currentSessionText.textContent = cur.name || '会话';
-        }
+        // 兼容性处理：将原生下拉的刷新调用路由到自定义的会话列表面板
+        await this.refreshSessionListPanel();
     }
 
     async renderActiveSessionMessages() {
