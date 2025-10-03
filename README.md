@@ -5,11 +5,13 @@ A Chrome extension that connects to a local Ollama server and allows chatting wi
 ## Features
 
 - Select a local model and send prompts
-- Display model responses in the popup UI
-- Session management: create/switch/rename/delete
+- Display model responses in the popup UI with **streaming support**
+- Enhanced session management UI with intuitive menu system
 - Auto-save all conversations, no temporary session concept
 - Continue conversations with full context via `/api/chat`
 - Export current/all sessions to JSON
+- Real-time streaming responses with typewriter effect (configurable)
+- Improved user interface with better session controls
 
 ## Requirements
 
@@ -26,11 +28,12 @@ ollama serve
 ```
 
 2. Open `chrome://extensions/`, enable Developer mode and load unpacked extension pointing to this project folder.
-3. Open the extension popup, select a model and send messages.
-4. Use the session dropdown at the top to create/switch sessions.
+3. Open the extension popup, configure settings (streaming is enabled by default), select a model and send messages.
+4. Use the session menu button at the top to access session management options (create/switch/rename/delete/export).
 
 ## Notes
 
 - If messages fail with HTTP 403, ensure `OLLAMA_ORIGINS` allows `chrome-extension://*`.
-- Non-streaming responses are used for compatibility.
+- Streaming responses are enabled by default for better user experience; can be disabled in settings if needed.
 - Unlimited storage permission is enabled to improve available storage for sessions; actual limits depend on the browser.
+- The extension supports multiple response formats and gracefully handles connection issues.

@@ -102,23 +102,59 @@ body {
     gap: 4px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.08);
     z-index: 10;
+    min-width: 120px;
 }
 
 .session-menu.hidden {
     display: none;
 }
 
-.menu-item {
-    background: #f9f9f9;
-    border: 1px solid #e5e5e5;
-    border-radius: 4px;
-    font-size: 14px;
+/* 改进的会话菜单样式 */
+.session-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border: none;
+    background: none;
     cursor: pointer;
-    padding: 4px 8px;
+    font-size: 12px;
+    color: #333;
+    border-radius: 4px;
+    width: 100%;
+    text-align: left;
 }
 
-.menu-item:hover {
-    background: #eee;
+.session-menu-item:hover {
+    background-color: #f0f0f0;
+}
+
+.session-menu-item.danger {
+    color: #d32f2f;
+}
+
+.session-menu-item.danger:hover {
+    background-color: #ffebee;
+}
+
+/* 改进的会话按钮样式 */
+#currentSessionBtn {
+    position: relative;
+    padding-right: 24px; /* 为下拉箭头留空间 */
+}
+
+.dropdown-arrow {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: #666;
+    pointer-events: none;
+}
+
+#currentSessionBtn:hover .dropdown-arrow {
+    color: #333;
 }
 
 .session-list {
@@ -195,6 +231,27 @@ body {
     border: 1px solid #ddd;
     border-radius: 4px;
     font-size: 12px;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    color: #333;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
+.setting-description {
+    font-size: 11px;
+    color: #666;
+    margin-top: 4px;
+    margin-left: 24px;
 }
 
 .setting-actions {
@@ -324,8 +381,23 @@ body {
 .message.streaming {
     background-color: #f8f9fa;
     border-left: 3px solid #1976d2;
+    position: relative;
 }
 
+.message.typing::after {
+    content: '|';
+    animation: blink 1s infinite;
+    color: #1976d2;
+    font-weight: bold;
+    margin-left: 2px;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+/* 加载状态的打字指示器（保留兼容性） */
 .message .typing-indicator {
     display: inline-block;
     margin-left: 5px;

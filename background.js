@@ -26,7 +26,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
           console.warn('sendResponse ACK failed:', e);
         }
         // 异步执行请求并通知前端
-        fetchChatAndNotify(request.url, request.model, request.messages);
+        const streamEnabled = request.stream !== false; // 默认启用流式，除非明确设置为false
+        fetchChatAndNotify(request.url, request.model, request.messages, streamEnabled);
         return;
       }
 
@@ -171,13 +172,22 @@ async function sendChatToOllama(url, model, messages, sendResponse) {
   }
 }
 
-async function fetchChatAndNotify(url, model, messages) {
+async function fetchChatAndNotify(url, model, messages, stream = true) {
+  let fullResponse = '';
+  let isFirstChunk = true;
+
   try {
-    console.log('fetchChatAndNotify -> sending', { url, model, messagesLength: Array.isArray(messages) ? messages.length : 'invalid' });
+    console.log('fetchChatAndNotify -> sending request', {
+      url,
+      model,
+      messagesLength: Array.isArray(messages) ? messages.length : 'invalid',
+      stream
+    });
+
     const response = await fetch(`${url}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream: false })
+      body: JSON.stringify({ model, messages, stream })
     });
 
     if (!response.ok) {
@@ -187,16 +197,111 @@ async function fetchChatAndNotify(url, model, messages) {
       return;
     }
 
-    const data = await response.json();
-    console.log('fetchChatAndNotify -> got data', data);
-    const assistantText = (data && data.message && typeof data.message.content === 'string')
-      ? data.message.content
-      : (typeof data.response === 'string' ? data.response : '');
+    // 如果不使用流式响应，直接处理完整响应
+    if (!stream) {
+      const data = await response.json();
+      console.log('fetchChatAndNotify -> got non-stream response', data);
+      const assistantText = (data && data.message && typeof data.message.content === 'string')
+        ? data.message.content
+        : (typeof data.response === 'string' ? data.response : '');
 
-    console.log('fetchChatAndNotify -> notifying popup', { assistantTextLength: assistantText.length });
-    chrome.runtime.sendMessage({ action: 'streamUpdate', chunk: assistantText, done: true, fullResponse: assistantText });
+      chrome.runtime.sendMessage({
+        action: 'streamUpdate',
+        chunk: assistantText,
+        done: true,
+        fullResponse: assistantText
+      });
+      return;
+    }
+
+    if (!response.body) {
+      throw new Error('Response body is not available');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+
+      if (done) {
+        console.log('fetchChatAndNotify -> stream ended');
+        // 发送最终完成信号
+        chrome.runtime.sendMessage({
+          action: 'streamUpdate',
+          chunk: '',
+          done: true,
+          fullResponse: fullResponse
+        });
+        break;
+      }
+
+      // 解码二进制数据为文本
+      const chunk = decoder.decode(value, { stream: true });
+      buffer += chunk;
+
+      // 处理NDJSON格式的流数据
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // 保留不完整的行
+
+      for (const line of lines) {
+        if (line.trim() === '') continue;
+
+        try {
+          const data = JSON.parse(line);
+          console.log('fetchChatAndNotify -> parsed chunk', data);
+
+          // 处理不同格式的响应
+          let chunkContent = '';
+
+          if (data.message && typeof data.message.content === 'string') {
+            // Ollama /api/chat 格式
+            chunkContent = data.message.content;
+          } else if (typeof data.response === 'string') {
+            // 兼容其他格式
+            chunkContent = data.response;
+          } else if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
+            // OpenAI兼容格式
+            chunkContent = data.choices[0].delta.content;
+          }
+
+          if (chunkContent) {
+            fullResponse += chunkContent;
+
+            // 发送流式更新
+            chrome.runtime.sendMessage({
+              action: 'streamUpdate',
+              chunk: chunkContent,
+              done: false,
+              fullResponse: fullResponse
+            });
+          }
+
+          // 检查是否完成
+          if (data.done === true || (data.choices && data.choices[0] && data.choices[0].finish_reason)) {
+            console.log('fetchChatAndNotify -> response completed');
+            chrome.runtime.sendMessage({
+              action: 'streamUpdate',
+              chunk: '',
+              done: true,
+              fullResponse: fullResponse
+            });
+            return;
+          }
+
+        } catch (parseError) {
+          console.warn('fetchChatAndNotify -> failed to parse line:', line, parseError);
+          // 继续处理下一行，不要因为一行解析失败而中断整个流
+        }
+      }
+    }
+
   } catch (err) {
     console.error('fetchChatAndNotify error:', err);
-    chrome.runtime.sendMessage({ action: 'streamError', error: err && err.message ? err.message : String(err) });
+    chrome.runtime.sendMessage({
+      action: 'streamError',
+      error: err && err.message ? err.message : String(err)
+    });
   }
 }

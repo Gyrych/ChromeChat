@@ -1,7 +1,8 @@
 class OllamaAssistant {
     constructor() {
         this.settings = {
-            ollamaUrl: 'http://localhost:11434'
+            ollamaUrl: 'http://localhost:11434',
+            enableStreaming: true
         };
         this.currentModel = '';
         // 仅用于UI显示的临时历史，真实持久化在会话对象中
@@ -33,12 +34,15 @@ class OllamaAssistant {
         this.sessionSelect = document.getElementById('sessionSelect');
         this.newSessionBtn = null;
         this.currentSessionBtn = document.getElementById('currentSessionBtn');
+        this.currentSessionText = document.getElementById('currentSessionText');
         this.sessionListPanel = document.getElementById('sessionListPanel');
+        this.sessionMenu = document.getElementById('sessionMenu');
 
         // 设置相关
         this.settingsBtn = document.getElementById('settingsBtn');
         this.settingsPanel = document.getElementById('settingsPanel');
         this.ollamaUrlInput = document.getElementById('ollamaUrl');
+        this.enableStreamingCheckbox = document.getElementById('enableStreaming');
         this.testConnectionBtn = document.getElementById('testConnection');
         this.saveSettingsBtn = document.getElementById('saveSettings');
 
@@ -66,11 +70,13 @@ class OllamaAssistant {
         if (result.ollamaSettings) {
             this.settings = { ...this.settings, ...result.ollamaSettings };
             this.ollamaUrlInput.value = this.settings.ollamaUrl;
+            this.enableStreamingCheckbox.checked = this.settings.enableStreaming;
         }
     }
 
     async saveSettings() {
         this.settings.ollamaUrl = this.ollamaUrlInput.value;
+        this.settings.enableStreaming = this.enableStreamingCheckbox.checked;
         await chrome.storage.local.set({
             ollamaSettings: this.settings
         });
@@ -103,9 +109,8 @@ class OllamaAssistant {
 
         // 会话管理事件
         this.sessionSelect.addEventListener('change', () => this.handleSessionSwitch());
-        // 新建按钮已移除，保留 handleNewSession 如需通过其他方式触发
-        this.currentSessionBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleSessionList(); });
-        document.addEventListener('click', (e) => this.handleGlobalClickForList(e));
+        this.currentSessionBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleSessionMenu(e); });
+        document.addEventListener('click', (e) => this.handleGlobalClickForMenus(e));
     }
 
     toggleSettings() {
@@ -217,7 +222,8 @@ class OllamaAssistant {
             const response = await this.sendMessageToBackground('sendChat', {
                 url: this.settings.ollamaUrl,
                 model: this.currentModel,
-                messages: messagesForChat
+                messages: messagesForChat,
+                stream: this.settings.enableStreaming
             });
             if (!response || !response.success) {
                 throw new Error((response && response.message) ? response.message : '后台无响应');
@@ -232,10 +238,24 @@ class OllamaAssistant {
 
     async handleStreamUpdate(request) {
         if (request.chunk && this.currentMessageId) {
+            // 添加流式响应样式类
+            const messageElement = document.getElementById(this.currentMessageId);
+            if (messageElement) {
+                messageElement.classList.add('streaming');
+                // 添加打字机光标效果
+                messageElement.classList.add('typing');
+            }
+
             this.updateMessageContent(this.currentMessageId, request.chunk);
         }
 
         if (request.done) {
+            // 移除流式样式
+            const messageElement = document.getElementById(this.currentMessageId);
+            if (messageElement) {
+                messageElement.classList.remove('streaming', 'typing');
+            }
+
             if (request.fullResponse) {
                 try {
                     // 优先尝试根据 DOM 元素上记录的 sessionTs 更新会话中对应的占位消息，实现自动保存
@@ -493,7 +513,7 @@ class OllamaAssistant {
             if (this.modelSelect) this.modelSelect.value = session.model;
         }
         // 更新当前会话按钮文本
-        if (this.currentSessionBtn && session) this.currentSessionBtn.textContent = session.name || '会话';
+        if (this.currentSessionText && session) this.currentSessionText.textContent = session.name || '会话';
     }
 
     async ensureActiveSession() {
@@ -547,9 +567,9 @@ class OllamaAssistant {
         }
         if (index.lastActiveSessionId) select.value = index.lastActiveSessionId;
         // 更新当前会话按钮文本
-        if (this.currentSessionBtn && index.lastActiveSessionId) {
+        if (this.currentSessionText && index.lastActiveSessionId) {
             const cur = await this.loadSession(index.lastActiveSessionId);
-            if (cur) this.currentSessionBtn.textContent = cur.name || '会话';
+            if (cur) this.currentSessionText.textContent = cur.name || '会话';
         }
     }
 
@@ -672,7 +692,29 @@ class OllamaAssistant {
         }
     }
 
+    toggleSessionMenu(e) {
+        // 隐藏其他菜单
+        this.hideSessionList();
+        this.hideSettings();
+
+        // 切换会话菜单
+        if (!this.sessionMenu) return;
+        const isHidden = this.sessionMenu.classList.contains('hidden');
+        if (isHidden) {
+            this.sessionMenu.classList.remove('hidden');
+            // 为菜单项添加事件监听器
+            this.attachSessionMenuEvents();
+        } else {
+            this.sessionMenu.classList.add('hidden');
+            this.detachSessionMenuEvents();
+        }
+    }
+
     toggleSessionList() {
+        // 隐藏其他菜单
+        this.hideSessionMenu();
+        this.hideSettings();
+
         if (!this.sessionListPanel) return;
         const isHidden = this.sessionListPanel.classList.contains('hidden');
         if (isHidden) {
@@ -685,15 +727,63 @@ class OllamaAssistant {
         }
     }
 
+    hideSessionMenu() {
+        if (!this.sessionMenu) return;
+        this.sessionMenu.classList.add('hidden');
+        this.detachSessionMenuEvents();
+    }
+
     hideSessionList() {
         if (!this.sessionListPanel) return;
         this.sessionListPanel.classList.add('hidden');
     }
 
-    handleGlobalClickForList(e) {
-        if (!this.sessionListPanel) return;
-        const within = this.sessionListPanel.contains(e.target) || (this.sessionListToggle && this.sessionListToggle.contains(e.target));
-        if (!within) this.hideSessionList();
+    attachSessionMenuEvents() {
+        if (!this.sessionMenu) return;
+        const menuItems = this.sessionMenu.querySelectorAll('.session-menu-item');
+        menuItems.forEach(item => {
+            item.addEventListener('click', (e) => this.handleSessionMenuAction(e));
+        });
+    }
+
+    detachSessionMenuEvents() {
+        if (!this.sessionMenu) return;
+        const menuItems = this.sessionMenu.querySelectorAll('.session-menu-item');
+        menuItems.forEach(item => {
+            item.removeEventListener('click', (e) => this.handleSessionMenuAction(e));
+        });
+    }
+
+    handleSessionMenuAction(e) {
+        const action = e.currentTarget.dataset.action;
+        this.hideSessionMenu();
+
+        switch (action) {
+            case 'new':
+                this.handleNewSession();
+                break;
+            case 'rename':
+                this.handleRenameSession();
+                break;
+            case 'export':
+                this.handleExportCurrentSession();
+                break;
+            case 'delete':
+                this.handleDeleteSession();
+                break;
+        }
+    }
+
+    handleGlobalClickForMenus(e) {
+        // 检查是否点击在任何菜单区域内
+        const withinSessionMenu = this.sessionMenu && this.sessionMenu.contains(e.target);
+        const withinSessionList = this.sessionListPanel && this.sessionListPanel.contains(e.target);
+        const withinCurrentSessionBtn = this.currentSessionBtn && this.currentSessionBtn.contains(e.target);
+
+        if (!withinSessionMenu && !withinSessionList && !withinCurrentSessionBtn) {
+            this.hideSessionMenu();
+            this.hideSessionList();
+        }
     }
 
     async refreshSessionListPanel() {
@@ -714,7 +804,7 @@ class OllamaAssistant {
                 await this.renderActiveSessionMessages();
                 this.hideSessionList();
                 // 更新当前会话按钮文本
-                if (this.currentSessionBtn) this.currentSessionBtn.textContent = s.name || '会话';
+                if (this.currentSessionText) this.currentSessionText.textContent = s.name || '会话';
             });
 
             const controls = document.createElement('div');
@@ -750,7 +840,7 @@ class OllamaAssistant {
         const index2 = await this.loadSessionIndex();
         if (index2.lastActiveSessionId) {
             const cur = await this.loadSession(index2.lastActiveSessionId);
-            if (this.currentSessionBtn && cur) this.currentSessionBtn.textContent = cur.name || '会话';
+            if (this.currentSessionText && cur) this.currentSessionText.textContent = cur.name || '会话';
         }
     }
 
