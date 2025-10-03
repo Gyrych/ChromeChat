@@ -10,39 +10,44 @@
     <div class="container">
         <!-- 顶部控制栏 -->
         <div class="header">
-            <div class="connection-status">
-                <span id="statusIndicator" class="status-indicator disconnected"></span>
-                <span id="statusText">未连接</span>
-            </div>
-            <div class="model-selector">
-                <!-- 使用侧边会话面板 `sessionListPanel` 替代原生下拉 -->
-                <div class="session-group">
-                    <button id="currentSessionBtn" class="btn secondary" title="管理会话">
-                        <span id="currentSessionText">会话</span>
-                        <span class="dropdown-arrow">▼</span>
-                    </button>
-                    <div id="sessionListPanel" class="session-list hidden">
-                        <!-- 会话条目将由脚本动态渲染 -->
-                    </div>
-                    <div id="sessionMenu" class="session-menu hidden">
-                        <button class="session-menu-item" data-action="new">
-                            <span>➕</span> 新建会话
+            <div class="header-top">
+                <div class="connection-status">
+                    <span id="statusIndicator" class="status-indicator disconnected"></span>
+                    <span id="statusText">未连接</span>
+                </div>
+                <div class="session-row">
+                    <div class="session-group">
+                        <button id="currentSessionBtn" class="btn secondary" title="管理会话">
+                            <span id="currentSessionText">会话</span>
+                            <span class="dropdown-arrow">▼</span>
                         </button>
-                        <button class="session-menu-item" data-action="rename">
-                            <span>✏️</span> 重命名
-                        </button>
-                        <button class="session-menu-item" data-action="export">
-                            <span>⬇️</span> 导出
-                        </button>
-                        <button class="session-menu-item danger" data-action="delete">
-                            <span>🗑️</span> 删除
-                        </button>
+                        <div id="sessionListPanel" class="session-list hidden">
+                            <!-- 会话条目将由脚本动态渲染 -->
+                        </div>
+                        <div id="sessionMenu" class="session-menu hidden">
+                            <button class="session-menu-item" data-action="new">
+                                <span>➕</span> 新建会话
+                            </button>
+                            <button class="session-menu-item" data-action="rename">
+                                <span>✏️</span> 重命名
+                            </button>
+                            <button class="session-menu-item" data-action="export">
+                                <span>⬇️</span> 导出
+                            </button>
+                            <button class="session-menu-item danger" data-action="delete">
+                                <span>🗑️</span> 删除
+                            </button>
+                        </div>
                     </div>
                 </div>
-                <select id="modelSelect">
-                    <option value="">选择模型...</option>
-                </select>
-                <button id="settingsBtn" class="icon-btn">⚙️</button>
+            </div>
+            <div class="header-bottom">
+                <div class="model-row">
+                    <select id="modelSelect">
+                        <option value="">选择模型...</option>
+                    </select>
+                    <button id="settingsBtn" class="icon-btn">⚙️</button>
+                </div>
             </div>
         </div>
 
@@ -75,8 +80,8 @@
             <div class="input-container">
                 <textarea id="messageInput" placeholder="输入您的问题..." rows="3"></textarea>
                 <div class="input-actions">
-                    <button id="clearChat" class="btn secondary">清空对话</button>
-                    <button id="sendMessage" class="btn primary">发送</button>
+                    <button id="newSessionBtn" class="btn secondary" disabled>新建会话</button>
+                    <button id="sendMessage" class="btn primary" disabled>发送</button>
                 </div>
             </div>
         </div>

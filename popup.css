@@ -19,12 +19,12 @@ body {
 
 /* 头部样式 */
 .header {
-    padding: 12px;
+    padding: 10px 12px;
     background: white;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid #e6e6e6;
     display: flex;
-    justify-content: space-between;
-    align-items: center;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .connection-status {
@@ -60,11 +60,59 @@ body {
 
 .model-selector {
     display: flex;
-    align-items: center;
+    /* 将模型选择区改为纵向排列，确保会话行与模型行分离
+       避免在宽度不足时自动换行导致布局错乱 */
+    flex-direction: column;
+    align-items: flex-start;
     gap: 6px;
-    /* keep controls compact and prevent wrapping */
-    flex-wrap: nowrap;
 }
+
+/* 新增两行布局：会话一行与模型选择一行 */
+.session-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.model-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 头部第一行：状态与会话按钮 */
+.header-top {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 头部第二行：模型选择与设置 */
+.header-bottom {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+}
+
+/* 调整会话按钮和模型选择器的视觉比例 */
+#currentSessionBtn {
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+#modelSelect {
+    min-width: 180px;
+    max-width: 260px;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+#currentSessionText { max-width: 160px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.icon-btn { padding: 6px; }
 
 .model-selector select {
     padding: 4px 8px;

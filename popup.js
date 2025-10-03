@@ -35,7 +35,7 @@ class OllamaAssistant {
         // 会话选择与管理
         // 已移除原生 sessionSelect，下方 UI 使用 sessionListPanel 管理会话
         this.sessionSelect = null;
-        this.newSessionBtn = null;
+        this.newSessionBtn = document.getElementById('newSessionBtn');
         this.currentSessionBtn = document.getElementById('currentSessionBtn');
         this.currentSessionText = document.getElementById('currentSessionText');
         this.sessionListPanel = document.getElementById('sessionListPanel');
@@ -92,11 +92,20 @@ class OllamaAssistant {
         this.saveSettingsBtn.addEventListener('click', () => this.saveSettings());
         this.testConnectionBtn.addEventListener('click', () => this.testConnection());
 
-        this.modelSelect.addEventListener('change', (e) => {
+        this.modelSelect.addEventListener('change', async (e) => {
+            const prevModel = this.currentModel;
             this.currentModel = e.target.value;
-            // 同步当前会话的模型名（若已选中会话）
-            if (this.activeSessionId) {
-                this.updateActiveSessionModel(this.currentModel);
+            // 当用户选择模型后：启用输入与发送按钮，并在首次选择模型时自动创建一个会话
+            this.updateInteractionState();
+            if (this.currentModel && !this.activeSessionId) {
+                // 在用户首次选定模型时，自动新建一个会话
+                const id = await this.createSession({ model: this.currentModel, name: this.defaultSessionName(this.currentModel) });
+                await this.setActiveSession(id);
+                await this.refreshSessionSelect();
+                await this.renderActiveSessionMessages();
+            } else if (this.activeSessionId) {
+                // 同步当前会话的模型名（若已选中会话）
+                await this.updateActiveSessionModel(this.currentModel);
             }
         });
 
@@ -109,6 +118,7 @@ class OllamaAssistant {
         });
 
         this.clearChatBtn.addEventListener('click', () => this.handleClearConversation());
+        if (this.newSessionBtn) this.newSessionBtn.addEventListener('click', () => this.handleNewSessionButSavePrevious());
 
         // 会话管理事件
         // 原生下拉已移除，保留该逻辑注释以便将来需要时恢复
@@ -142,9 +152,8 @@ class OllamaAssistant {
             if (response && response.success) {
                 this.updateStatus('connected', '已连接');
                 await this.loadModels();
-                await this.ensureActiveSession();
+                // 不再在打开插件时自动创建或加载会话，直到用户选择模型
                 await this.refreshSessionSelect();
-                await this.renderActiveSessionMessages();
             } else {
                 throw new Error((response && response.message) ? response.message : '后台无响应');
             }
@@ -168,6 +177,9 @@ class OllamaAssistant {
             }
         } catch (error) {
             console.error('加载模型失败:', error);
+        } finally {
+            // 模型列表加载后，初始化交互状态（若未选择模型则禁用输入）
+            this.updateInteractionState();
         }
     }
 
@@ -209,6 +221,9 @@ class OllamaAssistant {
 
             // 在会话中追加一个占位的助手消息（内容为空），以便后续更新时能保存到会话
             await this.appendMessageToActiveSession({ role: 'assistant', content: '' });
+
+            // 发送完用户消息后，立即覆盖保存一次当前会话（自动保存点1）
+            await this.saveSession(await this.loadSession(this.activeSessionId));
 
             // 将该会话消息的时间戳映射到 DOM 元素，便于后续更新时定位并保存（读取最后一条消息的 ts）
             const session = await this.loadSession(this.activeSessionId);
@@ -272,6 +287,8 @@ class OllamaAssistant {
                         // fallback：找最后一条空内容的 assistant 消息并更新
                         await this.updateLastAssistantPlaceholder(request.fullResponse);
                     }
+                    // 在模型返回并会话更新后，立即覆盖保存一次当前会话（自动保存点2）
+                    await this.saveSession(await this.loadSession(this.activeSessionId));
                     await this.refreshSessionTimestamps();
                 } catch (e) {
                     console.error('保存助手消息失败:', e);
@@ -425,9 +442,11 @@ class OllamaAssistant {
 
     async handleClearConversation() {
         try {
-            // 清空前自动保存当前会话（会话已在磁盘中，不需要额外动作）
-            // 创建一个新的会话并切换，以避免将后续消息继续追加到已保存历史
+            // 旧的 "清空对话" 行为改为“新建会话并保存当前会话”。
             await this.ensureActiveSession();
+            // 在新建之前保存当前会话（覆盖保存）
+            const curSession = await this.loadSession(this.activeSessionId);
+            if (curSession) await this.saveSession(curSession);
             const currentModel = this.currentModel;
             const newSessionId = await this.createSession({ model: currentModel, name: this.defaultSessionName(currentModel) });
             await this.setActiveSession(newSessionId);
@@ -597,6 +616,20 @@ class OllamaAssistant {
         await this.refreshSessionListPanel();
     }
 
+    // 根据是否已选择模型来启用或禁用输入/按钮
+    updateInteractionState() {
+        const enabled = !!this.currentModel;
+        if (this.sendMessageBtn) this.sendMessageBtn.disabled = !enabled;
+        if (this.newSessionBtn) this.newSessionBtn.disabled = !enabled;
+        if (this.messageInput) this.messageInput.disabled = !enabled;
+        // 可视化提示：当无模型时输入框显示提示文案
+        if (!enabled) {
+            if (this.messageInput) this.messageInput.placeholder = '请先选择模型以启用对话';
+        } else {
+            if (this.messageInput) this.messageInput.placeholder = '输入您的问题...';
+        }
+    }
+
     async renderActiveSessionMessages() {
         this.clearConversationUI();
         if (!this.activeSessionId) return;
@@ -636,6 +669,14 @@ class OllamaAssistant {
         await this.setActiveSession(id);
         await this.refreshSessionSelect();
         await this.renderActiveSessionMessages();
+    }
+
+    // 新建会话，但先保存当前会话再新建（供新建按钮使用）
+    async handleNewSessionButSavePrevious() {
+        await this.ensureActiveSession();
+        const cur = await this.loadSession(this.activeSessionId);
+        if (cur) await this.saveSession(cur);
+        await this.handleNewSession();
     }
 
     async handleRenameSession() {
