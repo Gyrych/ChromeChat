@@ -7,7 +7,7 @@ A Chrome extension that connects to a local Ollama server and allows chatting wi
 - Select a local model and send prompts
 - Display model responses in the popup UI with **streaming support**
 - Enhanced session management UI with intuitive menu system
--- Auto-save all conversations, no temporary session concept
+- Session auto-save: sessions are persisted only at two moments (after the user sends a message, and after the model returns a complete response); unsaved/temporary sessions may be kept in memory until they contain user messages.
 - Continue conversations with full context via `/api/chat`
 - Export current/all sessions to JSON
 - Real-time streaming responses with typewriter effect (configurable)
