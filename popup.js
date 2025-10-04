@@ -16,12 +16,92 @@ class OllamaAssistant {
         this.maxMessagesToKeep = 20; // 简易上下文截断策略：仅保留最近N条
         // 简单的内存级写锁，用于避免对 session index 与单个 session 的并发写入竞态
         this._sessionLocks = {}; // { [sessionId]: Promise }
+        this._unsavedSessions = {}; // 临时内存会话，避免在无消息时持久化
 
         this.initializeElements();
         this.loadSettings();
         this.attachEventListeners();
         this.setupMessageListeners();
+        // 在 popup 初始化时尝试拉取 background 中因 popup 不在而持久化的 pending 消息
+        if (typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.local) {
+            this._deferredFetchPending = setTimeout(() => { try { this._fetchPendingMessages(); } catch (e) { console.warn('fetchPendingMessages 异常:', e); } }, 200);
+        }
         this.testConnection();
+    }
+
+    // 简单的 HTML 转义函数（作为类方法）
+    escapeHtml(str) {
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // 简单安全的 Markdown 渲染器，作为类方法
+    renderMessageHtml(raw) {
+        if (!raw) return '';
+        let s = raw;
+        const codeBlocks = [];
+        s = s.replace(/```([\s\S]*?)```/g, (m, code) => {
+            codeBlocks.push(code);
+            return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
+        });
+
+        // 转义 HTML
+        s = this.escapeHtml(s);
+
+        // 恢复代码块
+        s = s.replace(/__CODE_BLOCK_(\d+)__/g, (m, idx) => {
+            const code = this.escapeHtml(codeBlocks[Number(idx)] || '');
+            return `<pre><code>${code}</code></pre>`;
+        });
+
+        // 行内代码
+        s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+        s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+
+        s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) => {
+            const safeUrl = this.escapeHtml(url);
+            return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+        });
+
+        const lines = s.split(/\r?\n/);
+        let inList = false;
+        const out = [];
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const m = line.match(/^\s*[-*+]\s+(.*)$/);
+            if (m) {
+                if (!inList) { out.push('<ul>'); inList = true; }
+                out.push(`<li>${m[1]}</li>`);
+            } else {
+                if (inList) { out.push('</ul>'); inList = false; }
+                if (line.trim() === '') out.push('<br>'); else out.push(`<p>${line}</p>`);
+            }
+        }
+        if (inList) out.push('</ul>');
+        return out.join('');
+    }
+
+    async _fetchPendingMessages() {
+        try {
+            const res = await chrome.storage.local.get(['ollama.pendingStreamUpdates', 'ollama.pendingStreamErrors']);
+            const updates = res['ollama.pendingStreamUpdates'] || [];
+            const errors = res['ollama.pendingStreamErrors'] || [];
+
+            for (const u of updates) {
+                try { this.handleStreamUpdate(u); } catch (e) { console.warn('处理 pending update 失败:', e); }
+            }
+
+            for (const e of errors) {
+                try { this.handleStreamError(e); } catch (er) { console.warn('处理 pending error 失败:', er); }
+            }
+
+            // 清理已消费的 pending
+            if (updates.length || errors.length) {
+                await chrome.storage.local.remove(['ollama.pendingStreamUpdates', 'ollama.pendingStreamErrors']);
+            }
+        } catch (err) {
+            console.warn('fetchPendingMessages 异常:', err);
+        }
     }
 
     initializeElements() {
@@ -68,6 +148,8 @@ class OllamaAssistant {
         });
     }
 
+
+
     async loadSettings() {
         const result = await chrome.storage.local.get(['ollamaSettings']);
         if (result.ollamaSettings) {
@@ -88,11 +170,11 @@ class OllamaAssistant {
     }
 
     attachEventListeners() {
-        this.settingsBtn.addEventListener('click', () => this.toggleSettings());
-        this.saveSettingsBtn.addEventListener('click', () => this.saveSettings());
-        this.testConnectionBtn.addEventListener('click', () => this.testConnection());
+        if (this.settingsBtn) this.settingsBtn.addEventListener('click', () => this.toggleSettings());
+        if (this.saveSettingsBtn) this.saveSettingsBtn.addEventListener('click', () => this.saveSettings());
+        if (this.testConnectionBtn) this.testConnectionBtn.addEventListener('click', () => this.testConnection());
 
-        this.modelSelect.addEventListener('change', async (e) => {
+        if (this.modelSelect) this.modelSelect.addEventListener('change', async (e) => {
             const prevModel = this.currentModel;
             this.currentModel = e.target.value;
             // 当用户选择模型后：启用输入与发送按钮，并在首次选择模型时自动创建一个会话
@@ -109,23 +191,28 @@ class OllamaAssistant {
             }
         });
 
-        this.sendMessageBtn.addEventListener('click', () => this.sendMessage());
-        this.messageInput.addEventListener('keydown', (e) => {
+        if (this.sendMessageBtn) this.sendMessageBtn.addEventListener('click', () => this.sendMessage());
+        if (this.messageInput) this.messageInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.sendMessage();
             }
         });
 
-        this.clearChatBtn.addEventListener('click', () => this.handleClearConversation());
+        if (this.clearChatBtn) this.clearChatBtn.addEventListener('click', () => this.handleClearConversation());
         if (this.newSessionBtn) this.newSessionBtn.addEventListener('click', () => this.handleNewSessionButSavePrevious());
 
         // 会话管理事件
         // 原生下拉已移除，保留该逻辑注释以便将来需要时恢复
         // this.sessionSelect.addEventListener('change', () => this.handleSessionSwitch());
         // 点击当前会话按钮显示会话列表面板（非操作菜单）
-        this.currentSessionBtn.addEventListener('click', (e) => { e.stopPropagation(); this.toggleSessionList(); });
-        document.addEventListener('click', (e) => this.handleGlobalClickForMenus(e));
+        if (this.currentSessionBtn) this.currentSessionBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            console.debug('currentSessionBtn clicked');
+            this.toggleSessionList();
+        });
+        // 使用捕获阶段监听，保证即使面板内部阻止了冒泡也能正确判断点击位置并关闭面板
+        document.addEventListener('click', (e) => this.handleGlobalClickForMenus(e), true);
     }
 
     toggleSettings() {
@@ -432,7 +519,7 @@ class OllamaAssistant {
 
         // 先以纯文本追加，最后由 renderMessageHtml 进行受控的 Markdown -> HTML 转换
         // 这里我们直接调用渲染函数以便即时显示格式化内容
-        messageElement.innerHTML = renderMessageHtml(updatedRaw);
+        messageElement.innerHTML = this.renderMessageHtml(updatedRaw);
         this.scrollToBottom();
     }
 
@@ -507,8 +594,12 @@ class OllamaAssistant {
 
     async loadSession(id) {
         const key = this.sessionKeyPrefix + id;
+        // 优先从持久化存储加载
         const result = await chrome.storage.local.get([key]);
-        return result[key] || null;
+        if (result && result[key]) return result[key];
+        // 若未持久化但存在内存临时会话则返回该对象
+        if (this._unsavedSessions && this._unsavedSessions[id]) return this._unsavedSessions[id];
+        return null;
     }
 
     async saveSession(session) {
@@ -517,7 +608,18 @@ class OllamaAssistant {
         // 使用会话级锁，确保对同一 session 的并发写入按序执行
         const release = await this._acquireSessionLock(session.id);
         try {
-            await chrome.storage.local.set({ [key]: session });
+            // 如果会话没有任何消息（仅创建但未写入用户消息），则不持久化
+            const hasNonEmpty = Array.isArray(session.messages) && session.messages.some(m => m && m.content && m.content.trim() !== '');
+            if (!hasNonEmpty) {
+                // 将会话保存在内存临时结构，避免丢失未保存状态，但不写入 storage
+                if (!this._unsavedSessions) this._unsavedSessions = {};
+                this._unsavedSessions[session.id] = session;
+            } else {
+                // 正常持久化
+                await chrome.storage.local.set({ [key]: session });
+                // 持久化后若存在内存临时副本则删除
+                if (this._unsavedSessions && this._unsavedSessions[session.id]) delete this._unsavedSessions[session.id];
+            }
         } finally {
             release();
         }
@@ -781,14 +883,47 @@ class OllamaAssistant {
         this.hideSettings();
 
         if (!this.sessionListPanel) return;
-        const isHidden = this.sessionListPanel.classList.contains('hidden');
+        const panel = this.sessionListPanel;
+        const isHidden = panel.classList.contains('hidden');
         if (isHidden) {
-            this.refreshSessionListPanel();
-            this.sessionListPanel.classList.remove('hidden');
-            // 调整位置以防超出弹窗右侧
-            this.adjustSessionListPosition();
+            console.debug('Showing session list panel');
+            // refreshSessionListPanel may be async; call it and ignore await to keep this method sync
+            this.refreshSessionListPanel().then(() => {
+                panel.classList.remove('hidden');
+                // 强制设置显示样式并提高 z-index 以防被覆盖
+                panel.style.display = 'flex';
+                panel.style.zIndex = '9999';
+                // 调整位置以防超出弹窗右侧
+                this.adjustSessionListPosition();
+
+                // 添加遮罩以捕获外部点击并关闭面板（避免其他元素阻止冒泡导致无法关闭）
+                if (!this._sessionListBackdrop) {
+                    const backdrop = document.createElement('div');
+                    backdrop.id = 'session-list-backdrop';
+                    backdrop.style.position = 'fixed';
+                    backdrop.style.left = '0';
+                    backdrop.style.top = '0';
+                    backdrop.style.width = '100%';
+                    backdrop.style.height = '100%';
+                    backdrop.style.background = 'transparent';
+                    backdrop.style.zIndex = '9998';
+                    backdrop.addEventListener('click', () => { this.hideSessionList(); });
+                    this._sessionListBackdrop = backdrop;
+                    // 将 backdrop 插入到 panel 之前
+                    const container = document.body || document.documentElement;
+                    container.appendChild(backdrop);
+                }
+            }).catch((e) => { console.warn('refreshSessionListPanel failed:', e); panel.classList.remove('hidden'); });
         } else {
-            this.sessionListPanel.classList.add('hidden');
+            console.debug('Hiding session list panel');
+            panel.classList.add('hidden');
+            panel.style.display = '';
+            panel.style.zIndex = '';
+            // 移除遮罩
+            if (this._sessionListBackdrop) {
+                try { this._sessionListBackdrop.remove(); } catch (e) { /* ignore */ }
+                this._sessionListBackdrop = null;
+            }
         }
     }
 
@@ -801,6 +936,16 @@ class OllamaAssistant {
     hideSessionList() {
         if (!this.sessionListPanel) return;
         this.sessionListPanel.classList.add('hidden');
+        // 重置样式
+        try {
+            this.sessionListPanel.style.display = '';
+            this.sessionListPanel.style.zIndex = '';
+        } catch (e) { /* ignore */ }
+        // 移除遮罩（如存在）
+        if (this._sessionListBackdrop) {
+            try { this._sessionListBackdrop.remove(); } catch (e) { /* ignore */ }
+            this._sessionListBackdrop = null;
+        }
     }
 
     attachSessionMenuEvents() {
@@ -915,20 +1060,29 @@ class OllamaAssistant {
         try {
             const panel = this.sessionListPanel;
             const btnRect = this.currentSessionBtn.getBoundingClientRect();
+            const parentRect = panel.offsetParent ? panel.offsetParent.getBoundingClientRect() : document.documentElement.getBoundingClientRect();
             const panelRect = panel.getBoundingClientRect();
             const popupWidth = document.documentElement.clientWidth || window.innerWidth;
 
-            // 如果右侧溢出，则将菜单左对齐到按钮左侧
-            if (btnRect.right + panelRect.width > popupWidth) {
-                panel.style.left = `${Math.max(8, btnRect.left)}px`;
+            // 计算相对于 offsetParent 的左偏移
+            let desiredLeft = btnRect.left - parentRect.left;
+
+            // 最大左偏移，确保面板不会超出右侧边界（保留 8px 边距）
+            const maxLeft = Math.max(8, popupWidth - 8 - panelRect.width - parentRect.left);
+
+            // 取合适的位置
+            let left = Math.max(8, Math.min(desiredLeft, maxLeft));
+
+            // 如果空间更适合右对齐，则使用 right:8px
+            if (left > (btnRect.left - parentRect.left + 8)) {
+                panel.style.left = `${left}px`;
                 panel.style.right = 'auto';
             } else {
-                // 否则保持右对齐（相对于 popup 右侧）
+                // 优先右对齐，避免覆盖按钮
                 panel.style.right = '8px';
                 panel.style.left = 'auto';
             }
         } catch (e) {
-            // 任何异常都不影响功能
             console.warn('调整会话列表位置失败:', e);
         }
     }
@@ -965,67 +1119,7 @@ class OllamaAssistant {
         a.click();
         URL.revokeObjectURL(url);
     }
-}
 
-// 简单安全的 Markdown 渲染器（支持代码块、行内代码、加粗、斜体、链接、换行与列表）
-// 注意：出于安全考虑，这个实现只处理有限的 Markdown 语法并对文本进行转义以避免 XSS
-function escapeHtml(str) {
-    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-function renderMessageHtml(raw) {
-    if (!raw) return '';
-    // 处理代码块 ``` ```
-    let s = raw;
-    // 临时占位用以避免后续替换影响代码块内容
-    const codeBlocks = [];
-    s = s.replace(/```([\s\S]*?)```/g, function(_, code) {
-        codeBlocks.push(code);
-        return `__CODE_BLOCK_${codeBlocks.length - 1}__`;
-    });
-
-    // 转义 HTML
-    s = escapeHtml(s);
-
-    // 恢复代码块为带 <pre><code>
-    s = s.replace(/__CODE_BLOCK_(\d+)__/g, function(_, idx) {
-        const code = escapeHtml(codeBlocks[Number(idx)] || '');
-        return `<pre><code>${code}</code></pre>`;
-    });
-
-    // 行内代码 `code`
-    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    // 加粗 **text** 和 斜体 *text*
-    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-    // 链接 [text](url)
-    s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
-        const safeUrl = escapeHtml(url);
-        return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
-    });
-
-    // 无序列表 - 前置换成 <ul><li>
-    // 先处理每行
-    const lines = s.split(/\r?\n/);
-    let inList = false;
-    const out = [];
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const m = line.match(/^\s*[-*+]\s+(.*)$/);
-        if (m) {
-            if (!inList) { out.push('<ul>'); inList = true; }
-            out.push(`<li>${m[1]}</li>`);
-        } else {
-            if (inList) { out.push('</ul>'); inList = false; }
-            // 普通段落，保留换行
-            if (line.trim() === '') out.push('<br>'); else out.push(`<p>${line}</p>`);
-        }
-    }
-    if (inList) out.push('</ul>');
-
-    return out.join('');
 }
 
 document.addEventListener('DOMContentLoaded', () => {

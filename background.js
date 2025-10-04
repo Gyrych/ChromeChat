@@ -55,6 +55,57 @@ async function testConnection(url, sendResponse) {
   }
 }
 
+// 将要发送给 popup 的消息保存为 pending，当 popup 不在时使用
+async function _savePendingMessage(payload) {
+  try {
+    const key = 'ollama.pendingStreamUpdates';
+    const res = await chrome.storage.local.get([key]);
+    const arr = res[key] || [];
+    arr.push(payload);
+    await chrome.storage.local.set({ [key]: arr });
+  } catch (e) {
+    console.error('保存 pending 消息失败:', e);
+  }
+}
+
+async function _savePendingError(payload) {
+  try {
+    const key = 'ollama.pendingStreamErrors';
+    const res = await chrome.storage.local.get([key]);
+    const arr = res[key] || [];
+    arr.push(payload);
+    await chrome.storage.local.set({ [key]: arr });
+  } catch (e) {
+    console.error('保存 pending 错误失败:', e);
+  }
+}
+
+// 安全地向 popup 发送消息；如果发送失败（例如接收端不存在），则将消息存储以便 popup 下次打开时取回
+async function safeSendToPopup(payload) {
+  try {
+    const res = chrome.runtime.sendMessage(payload);
+    // chrome.runtime.sendMessage 在某些环境返回 Promise
+    if (res && typeof res.then === 'function') await res;
+    return true;
+  } catch (err) {
+    console.warn('safeSendToPopup -> sendMessage failed, saving to storage', err, payload && payload.action);
+    await _savePendingMessage(payload);
+    return false;
+  }
+}
+
+async function safeSendErrorToPopup(payload) {
+  try {
+    const res = chrome.runtime.sendMessage(payload);
+    if (res && typeof res.then === 'function') await res;
+    return true;
+  } catch (err) {
+    console.warn('safeSendErrorToPopup -> sendMessage failed, saving error to storage', err, payload && payload.action);
+    await _savePendingError(payload);
+    return false;
+  }
+}
+
 async function getModels(url, sendResponse) {
   try {
     const response = await fetch(`${url}/api/tags`);
@@ -106,7 +157,8 @@ async function sendMessageToOllama(url, model, message, sendResponse) {
     const fullResponse = data.response || '';
 
     // 发送完整响应回popup
-    chrome.runtime.sendMessage({
+    // 使用安全发送，若 popup 不存在则持久化以便 popup 下次打开时取回
+    await safeSendToPopup({
       action: 'streamUpdate',
       chunk: fullResponse,
       done: true,
@@ -193,7 +245,7 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
     if (!response.ok) {
       const text = await response.text();
       console.error('fetchChatAndNotify HTTP error', response.status, text);
-      chrome.runtime.sendMessage({ action: 'streamError', error: `HTTP ${response.status}: ${text}` });
+      await safeSendErrorToPopup({ action: 'streamError', error: `HTTP ${response.status}: ${text}` });
       return;
     }
 
@@ -270,7 +322,7 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
             fullResponse += chunkContent;
 
             // 发送流式更新
-            chrome.runtime.sendMessage({
+            await safeSendToPopup({
               action: 'streamUpdate',
               chunk: chunkContent,
               done: false,
@@ -281,7 +333,7 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
           // 检查是否完成
           if (data.done === true || (data.choices && data.choices[0] && data.choices[0].finish_reason)) {
             console.log('fetchChatAndNotify -> response completed');
-            chrome.runtime.sendMessage({
+            await safeSendToPopup({
               action: 'streamUpdate',
               chunk: '',
               done: true,
@@ -299,7 +351,7 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
 
   } catch (err) {
     console.error('fetchChatAndNotify error:', err);
-    chrome.runtime.sendMessage({
+    await safeSendErrorToPopup({
       action: 'streamError',
       error: err && err.message ? err.message : String(err)
     });

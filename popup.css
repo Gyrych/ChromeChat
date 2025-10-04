@@ -217,7 +217,7 @@ body {
     flex-direction: column;
     gap: 6px;
     box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-    z-index: 50;
+    z-index: 9999; /* 提高优先级，防止被其他元素覆盖 */
     min-width: 260px;
     max-height: 300px;
     overflow: auto;
