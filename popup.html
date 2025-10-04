@@ -75,6 +75,18 @@
             <div id="messages" class="messages"></div>
         </div>
 
+        <!-- 底部：模型最大上下文与下一回合预计 tokens -->
+        <div class="footer-info">
+            <div class="model-context">
+                <span id="modelContextLabel">模型上下文:</span>
+                <span id="modelContextValue">未知</span>
+            </div>
+            <div class="estimate">
+                <span id="estimateLabel">预计 tokens:</span>
+                <strong id="nextTurnTokens">0</strong>
+            </div>
+        </div>
+
         <!-- 输入区域 -->
         <div class="input-area">
             <div class="input-container">

@@ -122,6 +122,17 @@
 - 是否接受使用非流式请求的方案（若需要流式响应，需进一步实现 Chrome 扩展对 NDJSON 流的兼容处理或使用外部代理）
 - 是否将 `CURSOR.md` 与 `README` 同步为中英文版本（我将根据用户指示继续更新 README）
 
+# 新增功能记录：模型上下文与 token 统计显示 (2025-10-04)
+
+- 更改文件：`popup.html`、`popup.css`、`popup.js`
+- 目的：在弹出窗口底部显示所选模型的最大上下文长度（若已知），以及当前会话的总 token 数和下一回合发送给模型的预计 token 数。方便用户把控上下文长度与成本。
+- 主要实现：
+  - 在 `popup.html` 添加底部信息栏，包含 `#modelContextValue`、`#totalTokens`、`#nextTurnTokens` 三个元素。
+  - 在 `popup.css` 中添加 `.footer-info`、`.model-context`、`.token-stats` 的样式，保证布局美观且与现有风格协调。
+  - 在 `popup.js` 内：添加 `updateModelContextDisplay()` 函数用于将已知模型名映射到其最大上下文长度并显示；添加 `estimateTokensFromText()` 与 `refreshTokenStats()` 实现简易 token 估算（按空格分词作为占位估算），并在关键交互点（切换模型、输入变化、发送前后）调用刷新。
+- 注意事项：当前 token 估算为简易基于词的估算，仅做相对参考；如果需要精确计数（例如使用特定 tokenizer）可后续集成更精确的 tokenizer 库或在后端由 Ollama/模型服务返回精确计数。
+
+
 ## 变更记录（自动追加）
 
 - 2025-10-03 13:00:00 - 修复 `popup.js` 中 `sendMessage` 的持久化顺序问题：

@@ -386,6 +386,25 @@ body {
     border-top: 1px solid #e0e0e0;
 }
 
+/* 底部信息栏 */
+.footer-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #fafafa;
+    border-top: 1px solid #eee;
+    gap: 10px;
+}
+
+.model-context { font-size: 13px; color: #333; display: flex; gap: 8px; align-items: center; }
+.model-context #modelContextLabel { color: #666; }
+.model-context #modelContextValue { font-weight: 600; }
+
+.estimate { font-size: 13px; color: #333; display: flex; gap: 8px; align-items: center; }
+.estimate #estimateLabel { color: #666; }
+.estimate strong { color: #1976d2; }
+
 .input-container {
     display: flex;
     flex-direction: column;

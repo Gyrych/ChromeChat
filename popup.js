@@ -135,6 +135,9 @@ class OllamaAssistant {
         this.messageInput = document.getElementById('messageInput');
         this.sendMessageBtn = document.getElementById('sendMessage');
         this.clearChatBtn = document.getElementById('clearChat');
+        // 底部显示元素：模型上下文与预计 tokens
+        this.modelContextValue = document.getElementById('modelContextValue');
+        this.nextTurnTokensEl = document.getElementById('nextTurnTokens');
     }
 
     setupMessageListeners() {
@@ -189,6 +192,8 @@ class OllamaAssistant {
                 // 同步当前会话的模型名（若已选中会话）
                 await this.updateActiveSessionModel(this.currentModel);
             }
+        this.updateModelContextDisplay();
+        this.refreshTokenStats();
         });
 
         if (this.sendMessageBtn) this.sendMessageBtn.addEventListener('click', () => this.sendMessage());
@@ -198,6 +203,8 @@ class OllamaAssistant {
                 this.sendMessage();
             }
         });
+
+        if (this.messageInput) this.messageInput.addEventListener('input', () => { this.refreshTokenStats(); });
 
         if (this.clearChatBtn) this.clearChatBtn.addEventListener('click', () => this.handleClearConversation());
         if (this.newSessionBtn) this.newSessionBtn.addEventListener('click', () => this.handleNewSessionButSavePrevious());
@@ -267,6 +274,56 @@ class OllamaAssistant {
         } finally {
             // 模型列表加载后，初始化交互状态（若未选择模型则禁用输入）
             this.updateInteractionState();
+            // 更新模型上下文显示（若已选模型则根据映射显示）
+            this.updateModelContextDisplay();
+            // 刷新 token 统计
+            this.refreshTokenStats();
+        }
+    }
+
+    // 根据模型名映射最大上下文长度并显示
+    updateModelContextDisplay() {
+        const map = {
+            'deepseek-r1:1.5b': '128k',
+            'gemma3:270m': '32k',
+            'gemma3:1b': '32k',
+            'gemma3:4b': '128k',
+            'qwen3:0.6b': '40k',
+            'qwen3:1.7b': '40k',
+            'qwen3:4b': '256k'
+        };
+        const val = map[this.currentModel] || '未知';
+        if (this.modelContextValue) this.modelContextValue.textContent = val;
+        return val;
+    }
+
+    // 简易 token 估算：按空格分词，作为占位估算
+    estimateTokensFromText(text) {
+        if (!text) return 0;
+        // 把连续空白视为分隔
+        const parts = String(text).trim().split(/\s+/);
+        return parts.filter(p => p.length > 0).length;
+    }
+
+    // 计算下一回合的预估 tokens（历史 + 当前输入），并在底部显示预览与估算
+    async refreshTokenStats() {
+        try {
+            let total = 0;
+            if (this.activeSessionId) {
+                const session = await this.loadSession(this.activeSessionId);
+                if (session && Array.isArray(session.messages)) {
+                    for (const m of session.messages) {
+                        total += this.estimateTokensFromText(m.content || '');
+                    }
+                }
+            }
+            const input = this.messageInput ? this.messageInput.value || '' : '';
+            const nextTurn = total + this.estimateTokensFromText(input);
+
+            // 更新预计 tokens
+            if (this.nextTurnTokensEl) this.nextTurnTokensEl.textContent = String(nextTurn);
+        } catch (e) {
+            console.warn('刷新 token 统计失败:', e);
         }
     }
 
@@ -298,6 +355,8 @@ class OllamaAssistant {
         // 添加用户消息到UI
         this.addMessage('user', message);
         this.messageInput.value = '';
+        // 发送后刷新 token 统计
+        this.refreshTokenStats();
 
         // 先在 UI 中显示助手占位
         this.currentMessageId = this.addMessage('assistant', '思考中...', true);
@@ -323,6 +382,9 @@ class OllamaAssistant {
             // 组装上下文（截断最近 N 条）
             const sessionForChat = await this.loadSession(this.activeSessionId);
             const messagesForChat = this.buildMessagesForChat(sessionForChat.messages);
+
+            // 在发送请求前刷新一次 token 统计（更准确地反映下一回合）
+            await this.refreshTokenStats();
 
             const response = await this.sendMessageToBackground('sendChat', {
                 url: this.settings.ollamaUrl,
@@ -377,6 +439,15 @@ class OllamaAssistant {
                     // 在模型返回并会话更新后，立即覆盖保存一次当前会话（自动保存点2）
                     await this.saveSession(await this.loadSession(this.activeSessionId));
                     await this.refreshSessionTimestamps();
+
+                    // 若 background 发送了精确 token 信息，更新底部显示（优先使用精确值）
+                    if (typeof request.totalTokens === 'number' || typeof request.promptTokens === 'number' || typeof request.genTokens === 'number') {
+                        const total = typeof request.totalTokens === 'number' ? request.totalTokens : ((request.promptTokens || 0) + (request.genTokens || 0));
+                        if (this.nextTurnTokensEl) this.nextTurnTokensEl.textContent = String(total || 0);
+                    } else {
+                        // fallback：使用本地估算
+                        await this.refreshTokenStats();
+                    }
                 } catch (e) {
                     console.error('保存助手消息失败:', e);
                     // 若更新失败，退回到追加行为以确保会话中至少有完整的回答

@@ -156,13 +156,20 @@ async function sendMessageToOllama(url, model, message, sendResponse) {
 
     const fullResponse = data.response || '';
 
-    // 发送完整响应回popup
-    // 使用安全发送，若 popup 不存在则持久化以便 popup 下次打开时取回
+    // 提取精确 token 计数（若有）
+    const promptTokens = (typeof data.prompt_eval_count === 'number') ? data.prompt_eval_count : (typeof data.prompt_tokens === 'number' ? data.prompt_tokens : null);
+    const genTokens = (typeof data.eval_count === 'number') ? data.eval_count : (typeof data.eval_tokens === 'number' ? data.eval_tokens : null);
+    const totalTokens = (promptTokens !== null || genTokens !== null) ? ((promptTokens || 0) + (genTokens || 0)) : null;
+
+    // 发送完整响应及 token 信息回 popup
     await safeSendToPopup({
       action: 'streamUpdate',
       chunk: fullResponse,
       done: true,
-      fullResponse: fullResponse
+      fullResponse: fullResponse,
+      promptTokens: promptTokens,
+      genTokens: genTokens,
+      totalTokens: totalTokens
     });
 
     sendResponse({ success: true, message: '响应完成' });
@@ -210,11 +217,19 @@ async function sendChatToOllama(url, model, messages, sendResponse) {
       ? data.message.content
       : (typeof data.response === 'string' ? data.response : '');
 
+    // 提取精确 token 计数（若有）
+    const promptTokens = (typeof data.prompt_eval_count === 'number') ? data.prompt_eval_count : (typeof data.prompt_tokens === 'number' ? data.prompt_tokens : null);
+    const genTokens = (typeof data.eval_count === 'number') ? data.eval_count : (typeof data.eval_tokens === 'number' ? data.eval_tokens : null);
+    const totalTokens = (promptTokens !== null || genTokens !== null) ? ((promptTokens || 0) + (genTokens || 0)) : null;
+
     chrome.runtime.sendMessage({
       action: 'streamUpdate',
       chunk: assistantText,
       done: true,
-      fullResponse: assistantText
+      fullResponse: assistantText,
+      promptTokens: promptTokens,
+      genTokens: genTokens,
+      totalTokens: totalTokens
     });
 
     sendResponse({ success: true, message: '响应完成' });
@@ -257,11 +272,18 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
         ? data.message.content
         : (typeof data.response === 'string' ? data.response : '');
 
+      const promptTokens = (typeof data.prompt_eval_count === 'number') ? data.prompt_eval_count : (typeof data.prompt_tokens === 'number' ? data.prompt_tokens : null);
+      const genTokens = (typeof data.eval_count === 'number') ? data.eval_count : (typeof data.eval_tokens === 'number' ? data.eval_tokens : null);
+      const totalTokens = (promptTokens !== null || genTokens !== null) ? ((promptTokens || 0) + (genTokens || 0)) : null;
+
       chrome.runtime.sendMessage({
         action: 'streamUpdate',
         chunk: assistantText,
         done: true,
-        fullResponse: assistantText
+        fullResponse: assistantText,
+        promptTokens: promptTokens,
+        genTokens: genTokens,
+        totalTokens: totalTokens
       });
       return;
     }
@@ -273,6 +295,10 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+
+    // 用于记录流中可能发送的最终 token 计数
+    let finalPromptTokens = null;
+    let finalGenTokens = null;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -331,13 +357,21 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
           }
 
           // 检查是否完成
+          // 若包含 token 字段则记录，可能在完成时发送给 popup
+          if (typeof data.prompt_eval_count === 'number') finalPromptTokens = data.prompt_eval_count;
+          if (typeof data.eval_count === 'number') finalGenTokens = data.eval_count;
+
           if (data.done === true || (data.choices && data.choices[0] && data.choices[0].finish_reason)) {
             console.log('fetchChatAndNotify -> response completed');
+            const totalTokens = (finalPromptTokens !== null || finalGenTokens !== null) ? ((finalPromptTokens || 0) + (finalGenTokens || 0)) : null;
             await safeSendToPopup({
               action: 'streamUpdate',
               chunk: '',
               done: true,
-              fullResponse: fullResponse
+              fullResponse: fullResponse,
+              promptTokens: finalPromptTokens,
+              genTokens: finalGenTokens,
+              totalTokens: totalTokens
             });
             return;
           }
