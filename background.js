@@ -25,9 +25,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         } catch (e) {
           console.warn('sendResponse ACK failed:', e);
         }
-        // 异步执行请求并通知前端
-        const streamEnabled = request.stream !== false; // 默认启用流式，除非明确设置为false
-        fetchChatAndNotify(request.url, request.model, request.messages, streamEnabled);
+        // 异步处理：在发送前评估 token 并在必要时生成摘要
+        (async () => {
+          const streamEnabled = request.stream !== false; // 默认启用流式，除非明确设置为false
+          try {
+            const { messages: preparedMessages, summaryMeta } = await prepareMessagesWithSummary(request.url, request.model, request.messages);
+            // 若生成了摘要，通知 popup（popup 会负责把摘要元数据写入对应 session）
+            if (summaryMeta) {
+              try { await notifySummaryGenerated(summaryMeta); } catch (e) { console.warn('notifySummaryGenerated failed', e); }
+            }
+            // 继续发送 chat 请求
+            await fetchChatAndNotify(request.url, request.model, preparedMessages, streamEnabled);
+          } catch (err) {
+            console.error('prepare/send chat failed, falling back to original messages', err);
+            // 通知 popup 生成摘要失败（供 UI 显示），继续尝试发送原始 messages
+            try { await safeSendToPopup({ action: 'summaryFailed', message: err && err.message ? err.message : String(err) }); } catch (e) { /* ignore */ }
+            await fetchChatAndNotify(request.url, request.model, request.messages, streamEnabled);
+          }
+        })();
         return;
       }
 
@@ -339,9 +354,22 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
           } else if (typeof data.response === 'string') {
             // 兼容其他格式
             chunkContent = data.response;
-          } else if (data.choices && data.choices[0] && data.choices[0].delta && data.choices[0].delta.content) {
-            // OpenAI兼容格式
-            chunkContent = data.choices[0].delta.content;
+          } else if (data.choices && data.choices[0] && data.choices[0].delta) {
+            // OpenAI兼容格式，delta 里可能包含 content 或 reasoning_content
+            const delta = data.choices[0].delta;
+            if (typeof delta.content === 'string' && delta.content !== '') {
+              chunkContent = delta.content;
+            } else if (typeof delta.reasoning_content === 'string' && delta.reasoning_content !== '') {
+              chunkContent = delta.reasoning_content;
+            }
+          } else if (data.delta && typeof data.delta === 'object') {
+            // 有些实现会把 delta 放在顶层的 data.delta
+            const deltaTop = data.delta;
+            if (typeof deltaTop.content === 'string' && deltaTop.content !== '') {
+              chunkContent = deltaTop.content;
+            } else if (typeof deltaTop.reasoning_content === 'string' && deltaTop.reasoning_content !== '') {
+              chunkContent = deltaTop.reasoning_content;
+            }
           }
 
           if (chunkContent) {
@@ -389,5 +417,144 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
       action: 'streamError',
       error: err && err.message ? err.message : String(err)
     });
+  }
+}
+
+// 将摘要元数据通过 safeSendToPopup 发送到 popup（字段名与 popup 期望一致）
+async function notifySummaryGenerated(meta) {
+  try {
+    await safeSendToPopup({ action: 'summaryGenerated', summaryId: meta.summaryId, summary: meta.summary, startIdx: meta.startIdx, endIdx: meta.endIdx, ts: meta.ts, byModel: meta.byModel });
+  } catch (e) {
+    console.warn('notifySummaryGenerated failed', e);
+  }
+}
+
+// 评估 prompt tokens（优先尝试 Ollama 返回的精确值，失败则返回 null）
+async function evaluatePromptTokens(url, model, messages) {
+  try {
+    // 发送一个不生成 token 的请求以让 Ollama 返回 prompt token 计数（若支持）
+    const resp = await fetch(`${url}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      // 通过 stream:false 并尽量让生成体为空，期待服务返回 prompt_eval_count 或 prompt_tokens
+      body: JSON.stringify({ model, messages, stream: false, max_tokens: 0 })
+    });
+
+    if (!resp.ok) {
+      console.warn('evaluatePromptTokens -> non-ok response', resp.status);
+      return null;
+    }
+
+    const data = await resp.json();
+    const promptTokens = (typeof data.prompt_eval_count === 'number') ? data.prompt_eval_count : (typeof data.prompt_tokens === 'number' ? data.prompt_tokens : null);
+    return promptTokens !== null ? promptTokens : null;
+  } catch (err) {
+    console.warn('evaluatePromptTokens failed', err);
+    return null;
+  }
+}
+
+// 使用当前 model 生成摘要，返回摘要文本与元数据
+async function generateSummary(url, model, messagesToSummarize) {
+  // 构造 system 指令，控制摘要行为
+  const systemPrompt = `请把下面的用户与助手对话摘要为一段用于后续对话的 system 上下文说明：保留关键决策、重要参数与代码块，摘要长度应不超过原始内容的 50%，语言与原文一致，不要删减 system 指令本身。`;
+
+  // 将 system 指令与待摘要消息拼接为一次 chat 请求
+  const reqMessages = [{ role: 'system', content: systemPrompt }].concat(messagesToSummarize.map(m => ({ role: m.role, content: m.content })));
+
+  const resp = await fetch(`${url}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages: reqMessages, stream: false })
+  });
+
+  if (!resp.ok) {
+    const txt = await resp.text().catch(() => '');
+    throw new Error(`generateSummary HTTP ${resp.status}: ${txt}`);
+  }
+
+  const data = await resp.json();
+  const summary = (data && data.message && typeof data.message.content === 'string') ? data.message.content : (typeof data.response === 'string' ? data.response : '');
+  if (!summary || !summary.trim()) throw new Error('摘要内容为空');
+
+  return summary;
+}
+
+// 准备 messages：评估 token 并在必要时生成摘要，返回最终发送的 messages 与摘要元数据（若有）
+async function prepareMessagesWithSummary(url, model, originalMessages) {
+  // 过滤出可被摘要的消息（排除 role=system）
+  const canBeSummarized = Array.isArray(originalMessages) ? originalMessages.filter(m => m && m.role && m.role !== 'system') : [];
+
+  // 读取模型最大上下文（简易内置映射，若未知返回 null）
+  const modelMaxContextMap = {
+    'deepseek-r1:1.5b': 128000,
+    'gemma3:270m': 32000,
+    'gemma3:1b': 32000,
+    'gemma3:4b': 128000,
+    'qwen3:0.6b': 40000,
+    'qwen3:1.7b': 40000,
+    'qwen3:4b': 256000
+  };
+  const maxContext = modelMaxContextMap[model] || null;
+
+  // 尝试精确评估 prompt tokens
+  let promptTokens = null;
+  try { promptTokens = await evaluatePromptTokens(url, model, originalMessages); } catch (e) { promptTokens = null; }
+
+  // 若无法从 Ollama 获得精确值且已知 maxContext，则无法准确触发时使用 null（调用方会回退到估算）
+  if (promptTokens === null && maxContext === null) {
+    // 无法判断，直接返回原始 messages
+    return { messages: originalMessages, summaryMeta: null };
+  }
+
+  // 判断是否需要摘要：若 promptTokens 可用则基于精确值判断；否则回退到本地估算（字符数/4）
+  let needsSummary = false;
+  if (promptTokens !== null && maxContext !== null) {
+    needsSummary = (promptTokens >= Math.floor(0.8 * maxContext));
+  } else if (maxContext !== null) {
+    // 估算 token：简单按字符数/4
+    const joined = canBeSummarized.map(m => m.content || '').join('\n');
+    const est = Math.max(0, Math.floor((joined.length || 0) / 4));
+    needsSummary = (est >= Math.floor(0.8 * maxContext));
+  }
+
+  if (!needsSummary) {
+    return { messages: originalMessages, summaryMeta: null };
+  }
+
+  // 需要生成摘要：我们将尝试对整个可被摘要的历史进行摘要，并在发送时插入为 system
+  try {
+    const summaryText = await generateSummary(url, model, canBeSummarized);
+    // 构建最终 messages：摘要作为 system 消息放在最前，随后保留最近若干条消息以保持上下文（例如最近 10 条）
+    const recentKeep = 10;
+    const recent = canBeSummarized.slice(-recentKeep).map(m => ({ role: m.role, content: m.content }));
+    // 同时保留原始 system 消息（如果存在）
+    const originalSystem = Array.isArray(originalMessages) ? originalMessages.filter(m => m && m.role === 'system') : [];
+    const finalMessages = [].concat(originalSystem, [{ role: 'system', content: summaryText }], recent);
+
+    // 生成摘要元数据（需要包含覆盖范围 startIdx/endIdx，使用索引基于原始 messages 列表）
+    // 计算 startIdx/endIdx 在 originalMessages 中的位置（第一个和最后一个非 system）
+    let startIdx = null, endIdx = null;
+    for (let i = 0; i < originalMessages.length; i++) {
+      const m = originalMessages[i];
+      if (m && m.role && m.role !== 'system') { startIdx = i; break; }
+    }
+    for (let i = originalMessages.length - 1; i >= 0; i--) {
+      const m = originalMessages[i];
+      if (m && m.role && m.role !== 'system') { endIdx = i; break; }
+    }
+
+    const meta = {
+      summaryId: 's_' + Date.now() + '_' + Math.floor(Math.random() * 1000000),
+      summary: summaryText,
+      startIdx: startIdx,
+      endIdx: endIdx,
+      ts: Date.now(),
+      byModel: model
+    };
+
+    return { messages: finalMessages, summaryMeta: meta };
+  } catch (err) {
+    throw err; // 调用方会处理失败回退
   }
 }

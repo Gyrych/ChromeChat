@@ -141,12 +141,50 @@ class OllamaAssistant {
     }
 
     setupMessageListeners() {
-        // 监听来自background script的流式更新
+        // 监听来自 background script 的消息（流式更新、摘要生成/失败等）
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-            if (request.action === 'streamUpdate') {
-                this.handleStreamUpdate(request);
-            } else if (request.action === 'streamError') {
-                this.handleStreamError(request);
+            if (!request || !request.action) return;
+            switch (request.action) {
+                case 'streamUpdate':
+                    this.handleStreamUpdate(request);
+                    break;
+                case 'streamError':
+                    this.handleStreamError(request);
+                    break;
+                case 'summaryGenerated':
+                    // 后台生成了摘要，request 包含 summaryMeta（summaryId, summary, startIdx, endIdx, ts, byModel）
+                    (async () => {
+                        try {
+                            const meta = {
+                                summaryId: request.summaryId,
+                                summary: request.summary,
+                                startIdx: request.startIdx,
+                                endIdx: request.endIdx,
+                                ts: request.ts,
+                                byModel: request.byModel
+                            };
+                            if (!this.activeSessionId) return;
+                            const session = await this.loadSession(this.activeSessionId);
+                            if (!session) return;
+                            // 将摘要元数据追加到 session.summaries
+                            if (!Array.isArray(session.summaries)) session.summaries = [];
+                            session.summaries.push(meta);
+                            await this.saveSession(session);
+                            // 重新渲染会话以显示摘要条目
+                            await this.renderActiveSessionMessages();
+                        } catch (e) {
+                            console.warn('处理 summaryGenerated 失败:', e);
+                        }
+                    })();
+                    break;
+                case 'summaryFailed':
+                    // 在 UI 中内嵌提示摘要失败
+                    if (this.currentMessageId) {
+                        this.updateMessageContent(this.currentMessageId, `\n（自动摘要失败：${request.message || '未知错误'}，将继续使用完整历史）`);
+                    } else {
+                        this.addMessage('assistant', `（自动摘要失败：${request.message || '未知错误'}，将继续使用完整历史）`);
+                    }
+                    break;
             }
         });
     }
@@ -813,9 +851,57 @@ class OllamaAssistant {
             this.currentModel = session.model;
             if (this.modelSelect) this.modelSelect.value = session.model;
         }
-        // 渲染消息
-        for (const m of session.messages) {
+        // 渲染消息（支持 summaries 折叠显示）
+        const summaries = Array.isArray(session.summaries) ? session.summaries : [];
+        const hiddenRanges = [];
+        for (const s of summaries) {
+            if (typeof s.startIdx === 'number' && typeof s.endIdx === 'number') hiddenRanges.push([s.startIdx, s.endIdx, s]);
+        }
+
+        for (let i = 0; i < session.messages.length; i++) {
+            const m = session.messages[i];
+            // 检查当前 index 是否处于某个被摘要的范围的开始
+            const startRange = hiddenRanges.find(r => r[0] === i);
+            if (startRange) {
+                const sMeta = startRange[2];
+                // 插入摘要条目
+                const summaryId = this.addMessage('system', `（已被摘要）${sMeta.summary}`);
+                const el = document.getElementById(summaryId);
+                if (el) {
+                    el.classList.add('summary-item');
+                    el.dataset.summaryId = sMeta.summaryId || '';
+                    el.addEventListener('click', async () => {
+                        // 展开原始范围：渲染原始消息并移除该摘要占位（用户可通过回滚操作恢复）
+                        await this.renderOriginalRange(session.id, sMeta.startIdx, sMeta.endIdx);
+                    });
+                }
+                // 跳过被摘要的原始消息范围
+                i = startRange[1];
+                continue;
+            }
             this.addMessage(m.role === 'assistant' ? 'assistant' : 'user', m.content);
+        }
+    }
+
+    // 展示原始范围的消息（用于展开摘要）
+    async renderOriginalRange(sessionId, startIdx, endIdx) {
+        try {
+            const session = await this.loadSession(sessionId);
+            if (!session) return;
+            // 清空当前 UI 并重渲染，插入原始范围的消息为未折叠状态
+            this.clearConversationUI();
+            for (let i = 0; i < session.messages.length; i++) {
+                const m = session.messages[i];
+                if (i >= startIdx && i <= endIdx) {
+                    // 直接渲染原始消息
+                    this.addMessage(m.role === 'assistant' ? 'assistant' : 'user', m.content);
+                } else {
+                    // 其他消息照常渲染（注意：若存在其他 summaries，本函数暂按简单方式处理）
+                    this.addMessage(m.role === 'assistant' ? 'assistant' : 'user', m.content);
+                }
+            }
+        } catch (e) {
+            console.error('renderOriginalRange failed:', e);
         }
     }
 
