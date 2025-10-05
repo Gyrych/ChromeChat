@@ -1,41 +1,68 @@
 # Ollama Chrome Assistant
 
-这是一个 Chrome 扩展，用于连接本地 Ollama 服务并与本地模型对话。
+轻量级 Chrome 扩展，在浏览器弹窗中与本地 Ollama 模型快速交互，面向技术工作流设计。支持多轮会话、流式与非流式响应、会话持久化与导出/导入。
 
-## 功能
+## 功能亮点
 
-- 在弹出窗口选择本地模型并发送 prompt
-- 支持**流式响应**显示模型返回结果
-- 增强的会话管理UI，直观的菜单系统
-- 会话自动保存：会话仅在两种时机持久化（用户发送消息后，以及模型返回完整回答后）；未保存的临时会话可能保留在内存中，直到包含用户消息才会持久化。
-- 通过 `/api/chat` 延续上下文进行多轮对话
-- 导出当前/全部会话为 JSON
-- 实时流式响应，打字机效果（可配置）
-- 改进的用户界面，更好的会话控制
+- 模型选择与快速发送 prompt
+- 流式响应（可配置打字机效果）与非流式回退
+- 会话管理：新建/切换/重命名/删除/导出
+- 自动持久化：在用户发送消息后及模型返回完整回答后保存会话
+- 使用 `/api/chat` 支持多轮上下文
+
+## 架构概览
+
+- 弹窗（UI）：`popup.html`、`popup.css`、`popup.js` — 负责渲染会话、用户交互与本地存储（`chrome.storage.local`）。
+- 后台 worker：`background.js` — 与 Ollama 网络交互（`/api/tags`、`/api/chat`、`/api/generate`）、流式解析、摘要生成，并将更新发送给 popup。
+- 存储：会话以 `ollama.session.<id>` 保存，索引保存在 `ollama.sessionIndex`。
 
 ## 运行要求
 
-- Chrome（支持 Manifest V3）
-- 本地运行 Ollama（默认 `http://localhost:11434`）
+- Chrome（Manifest V3）
+- 本地 Ollama 服务（默认 `http://localhost:11434`）
 
-## 安装与运行
+## 安装与配置
 
-1. 启动 Ollama 并允许扩展访问来源：
+1. 配置 Ollama 允许扩展访问（Windows PowerShell，管理员）：
 
 ```powershell
-$env:OLLAMA_ORIGINS = "chrome-extension://*"
-ollama serve
+setx OLLAMA_HOST "0.0.0.0:11434" -m
+setx OLLAMA_ORIGINS "chrome-extension://<YOUR_EXTENSION_ID>" -m
 ```
 
-2. 打开 `chrome://extensions/`，开启开发者模式（Developer mode），加载未打包扩展，选择本项目目录。
-3. 打开扩展弹窗，配置设置（流式响应默认启用）。注意：在选择模型之前，输入框和发送/新建会话按钮处于禁用状态。选择模型后，扩展会自动新建一个会话。
-4. 使用顶部会话菜单按钮访问会话管理选项（新建/切换/重命名/删除/导出）。
+将 `<YOUR_EXTENSION_ID>` 替换为 `chrome://extensions/` 中的扩展 id（不要带尖括号）。修改环境变量后需重启 Ollama 进程或系统。
 
-## 注意事项
+2. 加载扩展：
 
-- 如果返回 403 错误，请确保已设置 `OLLAMA_ORIGINS=chrome-extension://*`。
-- 流式响应默认启用以提供更好的用户体验；如需要可在设置中关闭。
-- 已启用 `unlimitedStorage` 权限以放宽存储限制；实际可用空间依浏览器实现而定。
-- 扩展支持多种响应格式，并优雅地处理连接问题。
-- 会话保存策略：
-  - 仅在两种时机覆盖保存当前会话：用户发送消息之后、模型返回完整回答之后。打开插件不会在未选模型时自动加载或创建会话。
+- 打开 `chrome://extensions/` → 开启开发者模式 → Load unpacked → 选择本项目目录。
+
+3. 打开弹窗，选择模型并开始对话。首次选择模型时会自动创建会话。
+
+## 使用说明
+
+- 会话只在两个时刻持久化：用户发送消息后、模型返回完整回答后，以减少频繁写入。
+- 可在会话菜单导出单个或全部会话为 JSON 文件。
+
+## 故障排查
+
+- 若 `GET /api/tags` 成功但 `POST /api/chat` 返回 403，通常是 `OLLAMA_ORIGINS` 未正确配置。可用以下命令排查：
+
+```bash
+curl -v -H "Origin: chrome-extension://<YOUR_EXTENSION_ID>" http://localhost:11434/api/tags
+```
+
+- 若流式解析失败（如 `Response body is not available`），请在设置中切换到非流式以获取完整 JSON 响应用于排查。
+
+## 安全注意
+
+- 生产环境不要将 `OLLAMA_ORIGINS` 设为 `*`，优先使用 `chrome-extension://<id>`。
+- 将 Ollama 暴露到局域网时，请在防火墙中限制访问权限。
+
+## 开发备注
+
+- background 负责将不同格式的响应统一为 `streamUpdate` 事件；popup 使用简单的字符/4 估算 token，可考虑集成 tokenizer 获取精确值。
+
+## 变更记录（高层）
+
+- 2025-10-05: 记录并修复 Ollama 白名单导致的 403 问题，更新文档。
+

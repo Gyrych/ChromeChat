@@ -1,41 +1,68 @@
 # Ollama Chrome Assistant
 
-A Chrome extension that connects to a local Ollama server and allows chatting with local models.
+Lightweight Chrome extension that provides a popup UI to interact with local Ollama models. Designed for quick technical workflows, it supports multi-turn sessions, streaming and non-streaming responses, session persistence, and export/import of sessions.
 
 ## Features
 
-- Select a local model and send prompts
-- Display model responses in the popup UI with **streaming support**
-- Enhanced session management UI with intuitive menu system
-- Session auto-save: sessions are persisted only at two moments (after the user sends a message, and after the model returns a complete response); unsaved/temporary sessions may be kept in memory until they contain user messages.
-- Continue conversations with full context via `/api/chat`
-- Export current/all sessions to JSON
-- Real-time streaming responses with typewriter effect (configurable)
-- Improved user interface with better session controls
+- Model selection and prompt sending in a compact popup UI
+- Streaming responses with typewriter effect (configurable)
+- Session management: create / switch / rename / delete / export
+- Automatic session persistence at two points: after user sends a message and after the model returns a full response
+- Support for `/api/chat` for multi-turn context; fallback to non-streaming when needed
+
+## Architecture Overview
+
+- Popup (UI): `popup.html`, `popup.css`, `popup.js` — user interface, session rendering, local persistence (`chrome.storage.local`).
+- Background worker: `background.js` — network layer to Ollama (`/api/tags`, `/api/chat`, `/api/generate`), stream parsing, summary generation, and bridging updates to popup.
+- Storage: sessions stored as `ollama.session.<id>`; index stored as `ollama.sessionIndex` in `chrome.storage.local`.
 
 ## Requirements
 
-- Chrome (Manifest V3 compatible)
-- Ollama running locally (default `http://localhost:11434`)
+- Chrome (Manifest V3)
+- Local Ollama service (default `http://localhost:11434`)
 
-## Installation
+## Installation & Configuration
 
-1. Start Ollama with origins allowed for extensions:
+1. Configure Ollama to allow requests from the extension. Recommended (Windows PowerShell, admin):
 
 ```powershell
-$env:OLLAMA_ORIGINS = "chrome-extension://*"
-ollama serve
+setx OLLAMA_HOST "0.0.0.0:11434" -m
+setx OLLAMA_ORIGINS "chrome-extension://<YOUR_EXTENSION_ID>" -m
 ```
 
-2. Open `chrome://extensions/`, enable Developer mode and load unpacked extension pointing to this project folder.
-3. Open the extension popup, configure settings (streaming is enabled by default). Note: the input and send/new session buttons are disabled until you select a model. After selecting a model the extension will automatically create a new session.
-4. Use the session menu button at the top to access session management options (create/switch/rename/delete/export).
+Replace `<YOUR_EXTENSION_ID>` with the extension id from `chrome://extensions/` (do not include angle brackets). Restart Ollama or the system after changing environment variables.
 
-## Notes
+2. Load the extension:
 
-- If messages fail with HTTP 403, ensure `OLLAMA_ORIGINS` allows `chrome-extension://*`.
-- Streaming responses are enabled by default for better user experience; can be disabled in settings if needed.
-- Unlimited storage permission is enabled to improve available storage for sessions; actual limits depend on the browser.
-- The extension supports multiple response formats and gracefully handles connection issues.
-- Session saving policy:
-  - Sessions are saved (overwritten) only at two moments: after the user sends a message, and after the model returns a complete response. Opening the popup will not auto-load or auto-create sessions until a model is selected.
+- Open `chrome://extensions/` → enable Developer mode → Load unpacked → select this project folder.
+
+3. Open the popup, choose a model, and start chatting. The extension will auto-create a session on first model selection.
+
+## Usage Notes
+
+- Sessions are auto-saved at two points to reduce write churn: after the user sends a message and after the assistant completes its response.
+- You can export single sessions or all sessions as JSON from the session menu.
+
+## Troubleshooting
+
+- If `GET /api/tags` succeeds but `POST /api/chat` returns 403, confirm `OLLAMA_ORIGINS` includes the extension origin. Test with:
+
+```bash
+curl -v -H "Origin: chrome-extension://<YOUR_EXTENSION_ID>" http://localhost:11434/api/tags
+```
+
+- If streaming fails (e.g. `Response body is not available`), switch to non-streaming in settings to capture a full JSON response for debugging.
+
+## Security
+
+- Do not set `OLLAMA_ORIGINS` to `*` in production. Prefer `chrome-extension://<id>`.
+- When exposing Ollama on a LAN (`0.0.0.0`), restrict firewall rules to limit access to trusted hosts.
+
+## Development Notes
+
+- The background worker normalizes different response formats and sends `streamUpdate` messages to the popup. The popup applies a simple token estimation (`chars/4`) for warnings; consider integrating a tokenizer for accuracy.
+
+## Changelog (high level)
+
+- 2025-10-05: Documented OLLAMA_ORIGINS fix and synced docs.
+

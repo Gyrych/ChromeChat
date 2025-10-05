@@ -1,141 +1,70 @@
-# 项目概览
+# 项目总览与架构文档
 
-本仓库为 Chrome 扩展：`Ollama Chrome Assistant`，用于通过本地 Ollama 服务与大模型进行对话。
+本文档为项目的系统化说明、运行指南与变更记录（CURSOR 记忆体）。内容覆盖：项目目标、目录结构、核心实现概览、运行与调试步骤、安全与部署注意、设计决策、已知限制与历史变更。
 
-主要文件：
-- `popup.html` / `popup.css` / `popup.js`：弹出窗口 UI 与前端逻辑
-- `background.js`：Service Worker，负责与 Ollama API 通信
-- `manifest.json`：扩展清单
+目的：为后续开发者（包含你本人）提供一份可以离线检索的、结构化的项目记忆，减少上下文切换成本并保证实现与 PRD/README 保持一致。
 
-技术栈与运行环境：
-- Chrome 扩展（Manifest V3）
-- 本地 Ollama 服务（默认 http://localhost:11434）
-- 仅使用浏览器内置 API（chrome.runtime、chrome.storage）
+一、项目简介
 
-运行与调试要点：
-- 确保 Ollama 服务运行并能通过 `http://localhost:11434/api/tags` 返回模型列表
-- 扩展需要 `host_permissions` 指定 Ollama 地址（manifest.json 已包含 `http://localhost:11434/*`）
-- 在开发中使用 `chrome://extensions/` 加载未打包扩展并打开弹出窗口的控制台查看日志
+- 名称：Ollama Chrome Assistant
+- 类型：Chrome 扩展（Manifest V3）
+- 功能：在浏览器弹窗中选择本地模型并与本地 Ollama 服务对话，支持会话管理、流式与非流式响应、会话导出/导入与摘要功能。
 
+二、目录与关键文件
 
-# 本次问题诊断（简要）
+- `popup.html` / `popup.css` / `popup.js`：前端 UI 与交互逻辑（会话管理、输入输出、模型选择、token 估算、设置面板）。
+- `background.js`：Service Worker，负责与 Ollama 的所有网络交互（/api/tags、/api/chat、/api/generate）、流式解析、摘要生成触发、与 popup 的消息桥接与 pending 缓存。
+- `manifest.json`：扩展清单（权限、host_permissions、service_worker）。
+- `doc/PRD_会话管理与上下文_zh.md`：会话管理 PRD 与设计决策。
+- `CURSOR.md`：本文件（项目记忆与变更记录）。
 
-问题描述：
-- 在弹出窗口发送消息时，背景脚本向 `http://localhost:11434/api/generate` 发送请求返回 403，导致消息发送失败。
+三、系统架构概览
 
-关键调试输出：
-- 选择模型: `qwen3:8b`
-- 发送消息: `你好`
-- 后台日志显示请求发送到 `http://localhost:11434/api/generate`，返回状态码 403。
+- 浏览器弹窗（popup）作为前端展示层，负责用户输入、会话渲染与本地持久化（`chrome.storage.local`）。
+- `background.js` 作为网络层与控制层，处理与 Ollama 的交互、流式数据解析与中间态存储（当 popup 关闭时，pending 消息会写入 local storage）。
+- 数据持久化：采用 `chrome.storage.local` 存储 session 对象与索引；会话持久化策略为“在用户发送消息后”和“模型返回完整回答后”两处自动保存。
 
-分析结论：
-- Ollama 默认会拒绝来自浏览器扩展/非受信任 origin 的请求。需要通过设置环境变量 `OLLAMA_ORIGINS` 允许扩展 origin（例如 `chrome-extension://*`）。
+四、关键实现细节
 
+- 会话模型：Session 对象包含 `id, name, model, createdAt, updatedAt, messages[]`，索引保存在 `ollama.sessionIndex`（sessions 列表 + lastActiveSessionId）。
+- 并发控制：在 `popup.js` 中引入内存级写锁 `_acquireSessionLock`，以序列化对单个 session 与索引的写操作，防止并发写入导致的数据竞争。
+- 流式解析：`background.js` 使用 `response.body.getReader()` 读取流，按行拆分 NDJSON，兼容多种格式（Ollama `/api/chat`、OpenAI 风格 delta），增量发送 `streamUpdate` 消息回 popup。
+- 摘要策略：在发送前评估 prompt tokens（尝试通过 `max_tokens:0` 请求获取服务端返回的 prompt_eval_count，如不可用则进行字符数/4 的估算），当接近模型上下文阈值时触发 `generateSummary` 并将摘要插入为 system 消息，保留最近若干条消息以维持短期上下文。
 
-# 我所做的修改（实现与理由）
+五、运行与配置（快速参考）
 
-1. 在 `popup.js` 中添加调试日志，输出当前选择的模型与发送的消息，便于定位请求参数：
-   - 目的：验证模型名称与前端传入的请求体是否正确。
+- 推荐环境变量（Windows，管理员 PowerShell）：
+  - `OLLAMA_HOST=0.0.0.0:11434`
+  - `OLLAMA_ORIGINS=chrome-extension://<YOUR_EXTENSION_ID>`
+  注意：不要在值周围使用尖括号。修改后需重启 Ollama 进程或系统以生效。
 
-2. 在 `background.js` 中添加更多日志，并调整与 Ollama 的请求处理：
-   - 原先使用流式（stream: true）在扩展环境中可能不稳定或触发服务器拒绝，临时改为非流式请求（stream: false）以便稳定获取完整 JSON 响应。
-   - 增加对错误响应体的打印，便于诊断服务器返回的详细原因。
-   - 曾尝试过用 XMLHttpRequest，后回退为标准 fetch 并记录响应头与响应体。
+- manifest 中已包含 `host_permissions` 指向 `http://localhost:11434/*`，确保扩展可发起请求。
 
-3. 文档：
-   - （本文件）记录诊断过程与最终结论。
-   - 新增 `doc/PRD_会话管理与上下文_zh.md`，定义“会话保存/加载/继续、多轮上下文与 /api/chat 切换、自动保存、导出、容量提醒、UI 交互”等需求范围与验收标准。
-   - 更新 `README.md` 与 `README_zh.md`：新增 Session 管理、自动保存、/api/chat、多会话导出等说明。
+六、调试要点与常见问题
 
+- 如果 `GET /api/tags` 成功但 `POST /api/chat` 返回 403，通常为 Ollama 白名单（`OLLAMA_ORIGINS`）问题。使用 `curl -v -H "Origin: chrome-extension://<id>"` 验证。
+- 若流式解析抛出 `Response body is not available`，说明服务端未提供可读流或被拦截，建议回退到非流式模式以获取完整 JSON 并打印响应体以诊断。
+- 在 popup 开发时若收不到流式更新，检查 background -> popup 的消息桥接（`chrome.runtime.sendMessage`）与 pending 缓存逻辑（`ollama.pendingStreamUpdates`）。
 
-# 操作建议（用户侧）
+七、安全与部署注意
 
-1. 启动 Ollama 时允许扩展 origin（必需）：
-   - Windows PowerShell：
-     ```powershell
-     $env:OLLAMA_ORIGINS = "chrome-extension://*"
-     ollama serve
-     ```
-   - 或使用批处理文件：
-     ```batch
-     @echo off
-     set OLLAMA_ORIGINS=chrome-extension://*
-     ollama serve
-     ```
+- 切勿长期在 `OLLAMA_ORIGINS` 使用 `*`，生产环境应仅允许具体扩展 origin。
+- 若需要通过局域网访问 Ollama，应同时在系统防火墙中针对端口 `11434` 做最小化放行策略。
 
-2. 重新加载扩展并在 popup 控制台查看日志：
-   - 打开 `chrome://extensions/`，点击扩展右下角刷新按钮
-   - 打开插件弹出页面并在开发者工具 Console 查看日志
+八、历史变更摘要（高亮）
 
+- 2025-09-30: 增加强调/debug 日志，改进 background 的错误处理；实现对 `/api/chat` 的支持并初步实现非流式回退逻辑。
+- 2025-10-02: 增加 PRD 并实现会话管理（CRUD、导出）、摘要触发与会话索引管理。
+- 2025-10-03: 重构会话 UI，完善流式解析、打字机效果与 token 显示。
+- 2025-10-05: 修复 Ollama 白名单导致的 403 问题，记录在本文件并同步到 README。
 
-# 变更记录
+九、未决与建议改进项
 
-- 2025-09-30 09:00:00 - 添加调试日志到 `popup.js`，记录模型与消息
-- 2025-09-30 09:10:00 - 修改 `background.js`：切换为非流式请求，增加错误输出，最后恢复为 `fetch` 并打印响应头
-- 2025-09-30 09:25:00 - 尝试使用 `XMLHttpRequest`（已回退），最终使用 `fetch` 并记录必要日志
-- 2025-10-02 10:00:00 - 增加 PRD 文档 `doc/PRD_会话管理与上下文_zh.md`，明确会话管理目标、数据结构、接口与 UI 方案
-- 2025-10-02 10:30:00 - 实现会话管理（会话下拉、CRUD、导出）、切换到 `/api/chat`、自动保存与容量提醒；更新 README 中英文。
-- 2025-10-02 10:40:00 - 隐藏弹出窗口顶部的连接状态文字，仅保留彩色指示器（修改 `popup.css`）。
-- 2025-10-03 11:00:00 - 增强会话管理UI：重构为菜单系统，添加操作按钮（新建、重命名、导出、删除），改进视觉设计和交互逻辑。
-- 2025-10-03 12:00:00 - 实现流式响应功能：支持NDJSON流式数据解析，用户可控制开关，默认启用，打字机效果，提升响应体验。
+- 更精确的 token 计数：集成 tokenizer 库或请求服务端提供精确计数以替代字符/4 的估算。
+- 流式兼容性：研究是否能通过 Service Worker 与 MessageChannel 更稳健地传递大体量 NDJSON 流，或引入本地小型代理以统一 CORS 与流式处理。
+- 自动化部署：提供可选的 Windows 服务或任务计划脚本以保证 Ollama 在系统启动时以正确环境变量启动，免去手动干预。
 
-
-# 近期改进
-
-## 会话管理UI增强 (2025-10-03)
-- **UI重构**: 将会话管理从简单的下拉列表改为更直观的菜单系统
-- **新增功能**:
-  - 会话操作菜单（新建、重命名、导出、删除）
-  - 改进的视觉设计，下拉箭头指示器
-  - 危险操作（删除）使用红色高亮提示
-- **交互优化**:
-  - 点击会话按钮显示操作菜单
-  - 右键或长按可快速访问会话列表
-  - 自动隐藏其他菜单，避免UI冲突
-- **代码改进**:
-  - 重构事件处理逻辑，支持动态菜单事件绑定
-  - 改进菜单显示/隐藏状态管理
-  - 增强点击外部区域关闭菜单的逻辑
-
-## 流式响应功能实现 (2025-10-03)
-- **核心功能**: 实现真正的流式AI响应，提升用户体验
-- **技术实现**:
-  - 支持NDJSON格式的流式数据解析
-  - 兼容多种响应格式（Ollama、OpenAI等）
-  - 实时文本流式显示，打字机效果
-  - 优雅的错误处理和连接管理
-- **用户控制**:
-  - 设置面板中添加流式响应开关
-  - 支持在流式和非流式模式间切换
-  - 默认启用流式响应
-- **UI增强**:
-  - 流式响应期间显示蓝色边框和打字机光标
-  - 响应完成后自动移除视觉效果
-  - 平滑的文本追加动画
-- **性能优化**:
-  - 高效的流数据处理，避免阻塞UI
-  - 智能缓冲区管理，处理不完整的JSON行
-  - 自动检测响应完成状态
-
-# 未完成/需确认项
-
-- 是否接受使用非流式请求的方案（若需要流式响应，需进一步实现 Chrome 扩展对 NDJSON 流的兼容处理或使用外部代理）
-- 是否将 `CURSOR.md` 与 `README` 同步为中英文版本（我将根据用户指示继续更新 README）
-
-# 文档同步与本次修改说明
-
-- 我已将 `README.md` 与 `README_zh.md` 中关于会话保存的描述更新为与代码实现一致：会话仅在用户发送消息后以及模型返回完整回答后持久化；尚未包含用户消息的会话可能保留在内存中，直到包含用户消息才会写入 storage。
-- 本次发布准备：建议在发布说明中注明对会话保存策略的调整与对 Ollama 服务的 `OLLAMA_ORIGINS` 要求。
-
-## 变更记录（自动追加）
-
-- 2025-10-04 10:30:00 - 同步 `README.md` / `README_zh.md` 的会话保存策略表述，确保文档与 `popup.js` 的实际持久化逻辑一致。
-
-## 新增：对话历史摘要功能与实现记录 (2025-10-04)
-
-- 2025-10-04 11:00:00 - 实现自动摘要触发逻辑：在 `background.js` 中新增 `evaluatePromptTokens`、`generateSummary`、`prepareMessagesWithSummary`。当 prompt token 达到模型最大上下文的 80% 时自动生成摘要。
-- 2025-10-04 11:10:00 - 摘要由当前选定模型生成，摘要作为 `system` 消息插入到发送的 messages 列表中；同时保留最近若干条原始消息以维持短期上下文。
-- 2025-10-04 11:15:00 - 在 `popup.js` 中接收 `summaryGenerated` 通知并将摘要元数据追加到会话对象的 `session.summaries` 字段；在渲染会话时把被摘要范围折叠为“已被摘要”条目，用户可点击展开原始范围。
+如需我把本文件进一步拆分为单独的开发文档（API 参考、架构图、变更日志），或把关键设计决策写成议题便于审阅，我可以继续分步输出。
 - 2025-10-04 11:20:00 - 实现摘要失败回退：当摘要生成失败时，后台会发送 `summaryFailed` 给 popup，popup 在会话中内嵌提示并继续使用完整历史发送请求。
 - 2025-10-04 11:25:00 - 导出/导入：会话导出已包含 `session.summaries` 字段，保证导入后能还原摘要元数据与原始历史。
 - 2025-10-04 11:30:00 - CURSOR.md 与 PRD 文档已同步更新，记录实现细节与审计要求（每次摘要需记录时间戳与覆盖范围）。
