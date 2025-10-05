@@ -5,7 +5,9 @@
   "description": "与本地Ollama大模型对话的Chrome插件",
   "permissions": [
     "storage",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "activeTab",
+    "scripting"
   ],
   "action": {
     "default_popup": "popup.html",

@@ -95,3 +95,8 @@
    - 相关文件：`popup.html`、`popup.js`
   - 变更：在 `popup.js` 中增加 `_sessionLocks` 结构与 `_acquireSessionLock` 方法，并在 `saveSession`、`saveSessionIndex`、`createSession`、`deleteSession` 中使用锁保护读写。
   - 目的：避免并发创建/删除/保存会话时导致索引或会话数据不一致的问题。
+
+- 2025-10-05 15:00:00 - 新增：抓取并发送当前网页正文功能（实现初版）
+  - 更改文件：`manifest.json`（添加 `scripting` 与 `activeTab` 权限）、`popup.html`（新增 `fetchAndSendBtn`）、`popup.js`（添加注入并保存逻辑）、新增 `content_fetch.js`（抓取/清洗页面文本）。
+  - 目的：允许用户在弹窗中一键抓取当前页面正文并将其作为 `user` 消息保存与发送，沿用后台摘要与分段处理逻辑。
+  - 状态：已实现前端注入与抓取脚本，后台分段/摘要逻辑将沿用现有 `prepareMessagesWithSummary`。

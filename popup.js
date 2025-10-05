@@ -135,6 +135,7 @@ class OllamaAssistant {
         this.messageInput = document.getElementById('messageInput');
         this.sendMessageBtn = document.getElementById('sendMessage');
         this.clearChatBtn = document.getElementById('clearChat');
+        this.fetchAndSendBtn = document.getElementById('fetchAndSendBtn');
         // 底部显示元素：模型上下文与预计 tokens
         this.modelContextValue = document.getElementById('modelContextValue');
         this.nextTurnTokensEl = document.getElementById('nextTurnTokens');
@@ -246,6 +247,7 @@ class OllamaAssistant {
 
         if (this.clearChatBtn) this.clearChatBtn.addEventListener('click', () => this.handleClearConversation());
         if (this.newSessionBtn) this.newSessionBtn.addEventListener('click', () => this.handleNewSessionButSavePrevious());
+        if (this.fetchAndSendBtn) this.fetchAndSendBtn.addEventListener('click', () => this.handleFetchAndSend());
 
         // 会话管理事件
         // 原生下拉已移除，保留该逻辑注释以便将来需要时恢复
@@ -258,6 +260,124 @@ class OllamaAssistant {
         });
         // 使用捕获阶段监听，保证即使面板内部阻止了冒泡也能正确判断点击位置并关闭面板
         document.addEventListener('click', (e) => this.handleGlobalClickForMenus(e), true);
+    }
+
+    // 抓取并发送：注入 content_fetch.js 并将抓取文本保存为 user 消息并触发 sendChat
+    async handleFetchAndSend() {
+        try {
+            if (!this.currentModel) {
+                alert('请先选择一个模型');
+                return;
+            }
+
+            await this.ensureActiveSession();
+
+            // 获取当前活动 tab
+            const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+            const tab = tabs && tabs[0];
+            if (!tab || !tab.id) {
+                alert('未检测到活动标签页');
+                return;
+            }
+
+            // 在 UI 中添加占位 user 消息
+            const placeholderId = this.addMessage('user', '正在抓取页面内容...');
+
+            let res = null;
+            try {
+                console.debug('handleFetchAndSend -> 注入 content_fetch.js 到 tabId', tab.id, 'url:', tab.url);
+                // 如果页面不允许注入脚本（如 chrome:// 或 Chrome Web Store），提前提示并返回
+                if (!this.isInjectableUrl(tab.url)) {
+                    const msg = '当前页面不允许脚本注入（例如 Chrome 商店或浏览器内部页面），请手动复制页面文本并粘贴到输入框后发送。';
+                    console.warn('handleFetchAndSend -> 注入被浏览器限制，url:', tab.url);
+                    // 直接把占位 user 消息替换为提示
+                    const el = document.getElementById(placeholderId);
+                    if (el) {
+                        el.dataset.raw = msg;
+                        el.textContent = msg;
+                    } else {
+                        this.addMessage('assistant', msg);
+                    }
+                    return;
+                }
+                const execResults = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content_fetch.js'] });
+                console.debug('handleFetchAndSend -> executeScript results', execResults);
+                res = execResults && execResults[0] && execResults[0].result ? execResults[0].result : null;
+
+                // 回退策略：若文件注入未返回结果，尝试直接注入内联函数读取 body
+                if (!res) {
+                    console.warn('content_fetch.js 未返回结果，尝试回退注入内联抓取函数');
+                    const fallback = await chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        func: () => {
+                            try {
+                                const normalize = s => (s || '').replace(/\s+/g, ' ').trim();
+                                const title = document.title || '';
+                                const url = window.location.href || '';
+                                const body = normalize(document.body ? document.body.innerText : '');
+                                // 返回一个简单的 textBlocks 数组
+                                return { title, url, textBlocks: body ? [body] : [] };
+                            } catch (e) { return null; }
+                        }
+                    });
+                    console.debug('handleFetchAndSend -> fallback results', fallback);
+                    res = fallback && fallback[0] && fallback[0].result ? fallback[0].result : null;
+                }
+
+                if (!res) throw new Error('未获取到页面内容');
+
+                const metaHeader = `${res.title || ''}\n${res.url || ''}\n\n`;
+                const fullText = metaHeader + (Array.isArray(res.textBlocks) ? res.textBlocks.join('\n\n') : (res.text || ''));
+
+                // 把“请用中文总结这个网页内容：”放在抓取到的页面内容开头，并作为 user 消息持久化与发送
+                const userPrefix = '请用中文总结这个网页内容：\n\n';
+                const userPrefixed = userPrefix + fullText;
+
+                // 更新 UI：把正在抓取的占位替换为最终的 user 内容（直接修改 DOM，避免使用 updateMessageContent 覆盖 user 气泡导致创建 assistant 复制）
+                const userEl = document.getElementById(placeholderId);
+                if (userEl) {
+                    userEl.dataset.raw = userPrefixed;
+                    userEl.innerHTML = this.renderMessageHtml(userPrefixed);
+                } else {
+                    this.addMessage('user', userPrefixed);
+                }
+
+                // 持久化为 user 消息
+                await this.appendMessageToActiveSession({ role: 'user', content: userPrefixed });
+
+                // 在会话中追加一个占位的 assistant 消息（内容为空），以便后续通过流式更新定位并保存回复
+                await this.appendMessageToActiveSession({ role: 'assistant', content: '' });
+
+                // 在 UI 中显示 assistant 占位并记录 currentMessageId 以供流式更新使用
+                this.currentMessageId = this.addMessage('assistant', '思考中...', true);
+
+                // 将该会话消息的时间戳映射到 DOM 元素，便于后续更新时定位并保存（读取最后一条消息的 ts）
+                const sessionAfter = await this.loadSession(this.activeSessionId);
+                if (sessionAfter && Array.isArray(sessionAfter.messages) && sessionAfter.messages.length) {
+                    const last = sessionAfter.messages[sessionAfter.messages.length - 1];
+                    const el = document.getElementById(this.currentMessageId);
+                    if (el && last) el.dataset.sessionTs = String(last.ts);
+                }
+
+                // 构建发送给后台的 messages（沿用已有截断/摘要策略）并发送
+                const messagesForChat = this.buildMessagesForChat((await this.loadSession(this.activeSessionId)).messages);
+                console.debug('handleFetchAndSend -> sending sendChat with messages length', messagesForChat.length);
+                const bgResp = await this.sendMessageToBackground('sendChat', {
+                    url: this.settings.ollamaUrl,
+                    model: this.currentModel,
+                    messages: messagesForChat,
+                    stream: this.settings.enableStreaming
+                });
+                console.debug('handleFetchAndSend -> background response', bgResp);
+
+            } catch (e) {
+                console.error('抓取失败:', e);
+                this.updateMessageContent(placeholderId, `抓取失败: ${e && e.message ? e.message : String(e)}`);
+            }
+
+        } catch (err) {
+            console.error('handleFetchAndSend error:', err);
+        }
     }
 
     toggleSettings() {
@@ -832,6 +952,7 @@ class OllamaAssistant {
         const enabled = !!this.currentModel;
         if (this.sendMessageBtn) this.sendMessageBtn.disabled = !enabled;
         if (this.newSessionBtn) this.newSessionBtn.disabled = !enabled;
+        if (this.fetchAndSendBtn) this.fetchAndSendBtn.disabled = !enabled;
         if (this.messageInput) this.messageInput.disabled = !enabled;
         // 可视化提示：当无模型时输入框显示提示文案
         if (!enabled) {
@@ -839,6 +960,19 @@ class OllamaAssistant {
         } else {
             if (this.messageInput) this.messageInput.placeholder = '输入您的问题...';
         }
+    }
+
+    // 判断给定 URL 是否允许注入脚本（排除 chrome://、chrome-extension://、webstore 等受限页面）
+    isInjectableUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        const lower = url.toLowerCase();
+        // 常见受限 scheme
+        if (lower.startsWith('chrome://') || lower.startsWith('chrome-extension://') || lower.startsWith('about:') || lower.startsWith('edge://')) return false;
+        // Chrome Web Store 页面（不允许注入）
+        if (lower.indexOf('chrome.google.com/webstore') !== -1) return false;
+        // 浏览器设置页或扩展管理页
+        if (lower.indexOf('extensions') !== -1 && (lower.startsWith('chrome://') || lower.indexOf('/extensions') !== -1)) return false;
+        return true;
     }
 
     async renderActiveSessionMessages() {
@@ -879,7 +1013,12 @@ class OllamaAssistant {
                 i = startRange[1];
                 continue;
             }
-            this.addMessage(m.role === 'assistant' ? 'assistant' : 'user', m.content);
+            const addedId = this.addMessage(m.role === 'assistant' ? 'assistant' : 'user', m.content);
+            // 初始渲染历史消息时使用 Markdown -> HTML 受控渲染
+            try {
+                const el = document.getElementById(addedId);
+                if (el) el.innerHTML = this.renderMessageHtml(m.content);
+            } catch (e) { /* ignore */ }
         }
     }
 
