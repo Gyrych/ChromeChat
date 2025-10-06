@@ -2,7 +2,8 @@ class OllamaAssistant {
     constructor() {
         this.settings = {
             ollamaUrl: 'http://localhost:11434',
-            enableStreaming: true
+            enableStreaming: true,
+            apiKey: ''
         };
         this.currentModel = '';
         // 仅用于UI显示的临时历史，真实持久化在会话对象中
@@ -126,6 +127,7 @@ class OllamaAssistant {
         this.settingsPanel = document.getElementById('settingsPanel');
         this.ollamaUrlInput = document.getElementById('ollamaUrl');
         this.enableStreamingCheckbox = document.getElementById('enableStreaming');
+        this.ollamaApiKeyInput = document.getElementById('ollamaApiKey');
         this.testConnectionBtn = document.getElementById('testConnection');
         this.saveSettingsBtn = document.getElementById('saveSettings');
 
@@ -198,12 +200,14 @@ class OllamaAssistant {
             this.settings = { ...this.settings, ...result.ollamaSettings };
             this.ollamaUrlInput.value = this.settings.ollamaUrl;
             this.enableStreamingCheckbox.checked = this.settings.enableStreaming;
+            if (this.ollamaApiKeyInput) this.ollamaApiKeyInput.value = this.settings.apiKey || '';
         }
     }
 
     async saveSettings() {
         this.settings.ollamaUrl = this.ollamaUrlInput.value;
         this.settings.enableStreaming = this.enableStreamingCheckbox.checked;
+        if (this.ollamaApiKeyInput) this.settings.apiKey = this.ollamaApiKeyInput.value;
         await chrome.storage.local.set({
             ollamaSettings: this.settings
         });

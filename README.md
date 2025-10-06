@@ -38,6 +38,8 @@ Replace `<YOUR_EXTENSION_ID>` with the extension id from `chrome://extensions/` 
 
 3. Open the popup, choose a model, and start chatting. The extension will auto-create a session on first model selection.
 
+Note about cloud models: If you want to use Ollama's cloud models at `https://ollama.com`, open the settings panel and enter your `Ollama API Key` (saved to `chrome.storage.local`). The extension will add an `Authorization: Bearer <API_KEY>` header when calling the cloud API. After updating `manifest.json` you must reload the extension in `chrome://extensions`.
+
 ## Usage Notes
 
 - Sessions are auto-saved at two points to reduce write churn: after the user sends a message and after the assistant completes its response.

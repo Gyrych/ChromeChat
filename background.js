@@ -28,8 +28,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // 异步处理：在发送前评估 token 并在必要时生成摘要
         (async () => {
           const streamEnabled = request.stream !== false; // 默认启用流式，除非明确设置为false
-          try {
-            const { messages: preparedMessages, summaryMeta } = await prepareMessagesWithSummary(request.url, request.model, request.messages);
+        try {
+            // 临时跳过 prompt token 评估与摘要生成以排查 upstream 502 问题
+            console.log('sendChat -> skipping prepareMessagesWithSummary (debug mode)');
+            const preparedMessages = request.messages;
+            const summaryMeta = null;
             // 若生成了摘要，通知 popup（popup 会负责把摘要元数据写入对应 session）
             if (summaryMeta) {
               try { await notifySummaryGenerated(summaryMeta); } catch (e) { console.warn('notifySummaryGenerated failed', e); }
@@ -59,7 +62,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 async function testConnection(url, sendResponse) {
   try {
-    const response = await fetch(`${url}/api/tags`);
+    const headers = await buildRequestHeaders(url, { 'Content-Type': 'application/json' });
+    const response = await fetch(`${url}/api/tags`, { headers });
     if (response.ok) {
       sendResponse({ success: true, message: '连接成功' });
     } else {
@@ -123,7 +127,8 @@ async function safeSendErrorToPopup(payload) {
 
 async function getModels(url, sendResponse) {
   try {
-    const response = await fetch(`${url}/api/tags`);
+    const headers = await buildRequestHeaders(url, { 'Content-Type': 'application/json' });
+    const response = await fetch(`${url}/api/tags`, { headers });
     if (response.ok) {
       const data = await response.json();
       sendResponse({ success: true, models: data.models || [] });
@@ -143,12 +148,11 @@ async function sendMessageToOllama(url, model, message, sendResponse) {
       message: message
     });
 
-    // 使用最简单的请求头
+    // 使用构建的请求头（可能包含 Authorization）
+    const headers = await buildRequestHeaders(url, { 'Content-Type': 'application/json' });
     const response = await fetch(`${url}/api/generate`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify({
         model: model,
         prompt: message,
@@ -203,11 +207,10 @@ async function sendChatToOllama(url, model, messages, sendResponse) {
       messagesLength: Array.isArray(messages) ? messages.length : 'invalid'
     });
 
+    const headers = await buildRequestHeaders(url, { 'Content-Type': 'application/json' });
     const response = await fetch(`${url}/api/chat`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers,
       body: JSON.stringify({
         model: model,
         messages: messages,
@@ -260,20 +263,35 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
 
   try {
     console.log('fetchChatAndNotify -> sending request', {
-      url,
+      url: normalizeUrl(url),
       model,
       messagesLength: Array.isArray(messages) ? messages.length : 'invalid',
-      stream
+      stream,
+      firstMessagePreview: (Array.isArray(messages) && messages[0]) ? (messages[0].content || '').slice(0, 120) : ''
     });
 
-    const response = await fetch(`${url}/api/chat`, {
+    const headers = await buildRequestHeaders(url, { 'Content-Type': 'application/json' });
+    console.log('fetchChatAndNotify -> request headers info', { hasAuthorization: !!headers.Authorization, urlHost: (new URL(normalizeUrl(url))).host });
+
+    // 过滤空 assistant 消息（有些上游实现会对空内容产生异常）
+    let sanitizedMessages = Array.isArray(messages) ? messages.filter(m => {
+      if (!m || !m.role) return false;
+      if (m.role === 'assistant') return typeof m.content === 'string' && m.content.trim() !== '';
+      return true;
+    }) : [];
+    if (sanitizedMessages.length === 0) sanitizedMessages = messages; // 若全被过滤，回退为原始
+    if (sanitizedMessages.length !== (messages ? messages.length : 0)) {
+      console.log('fetchChatAndNotify -> sanitizedMessages applied', { before: (messages||[]).length, after: sanitizedMessages.length });
+    }
+
+    const response = await fetch(`${normalizeUrl(url)}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, messages, stream })
+      headers,
+      body: JSON.stringify({ model, messages: sanitizedMessages, stream })
     });
 
     if (!response.ok) {
-      const text = await response.text();
+      const text = await response.text().catch(() => '');
       console.error('fetchChatAndNotify HTTP error', response.status, text);
       await safeSendErrorToPopup({ action: 'streamError', error: `HTTP ${response.status}: ${text}` });
       return;
@@ -343,7 +361,8 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
 
         try {
           const data = JSON.parse(line);
-          console.log('fetchChatAndNotify -> parsed chunk', data);
+          // 额外日志：将 chunk 长度与包含的 keys 打印出来，避免泄露完整内容
+          console.log('fetchChatAndNotify -> parsed chunk meta', { len: line.length, keys: Object.keys(data || {}) });
 
           // 处理不同格式的响应
           let chunkContent = '';
@@ -433,15 +452,18 @@ async function notifySummaryGenerated(meta) {
 async function evaluatePromptTokens(url, model, messages) {
   try {
     // 发送一个不生成 token 的请求以让 Ollama 返回 prompt token 计数（若支持）
-    const resp = await fetch(`${url}/api/chat`, {
+    const headers = await buildRequestHeaders(url, { 'Content-Type': 'application/json' });
+    console.log('evaluatePromptTokens -> POST', { url: normalizeUrl(url) + '/api/chat', model, headersInfo: { hasAuthorization: !!headers.Authorization } });
+    const resp = await fetch(`${normalizeUrl(url)}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       // 通过 stream:false 并尽量让生成体为空，期待服务返回 prompt_eval_count 或 prompt_tokens
       body: JSON.stringify({ model, messages, stream: false, max_tokens: 0 })
     });
 
     if (!resp.ok) {
-      console.warn('evaluatePromptTokens -> non-ok response', resp.status);
+      const txt = await resp.text().catch(() => '');
+      console.warn('evaluatePromptTokens -> non-ok response', resp.status, txt);
       return null;
     }
 
@@ -452,6 +474,39 @@ async function evaluatePromptTokens(url, model, messages) {
     console.warn('evaluatePromptTokens failed', err);
     return null;
   }
+}
+
+// 构建请求头，如果目标是 ollama.com 且用户在设置中提供了 apiKey，则自动加入 Authorization
+async function buildRequestHeaders(url, extraHeaders = {}) {
+  // 克隆 extraHeaders，避免外部被修改
+  const headers = Object.assign({}, extraHeaders || {});
+  try {
+    // 读取存储的 API Key（如果存在，则无论目标 host 都加入 Authorization）
+    const res = await chrome.storage.local.get(['ollamaSettings']);
+    const settings = res.ollamaSettings || {};
+    const apiKey = settings.apiKey || '';
+    if (apiKey && typeof apiKey === 'string' && apiKey.trim() !== '') {
+      headers['Authorization'] = 'Bearer ' + apiKey.trim();
+    }
+  } catch (e) {
+    console.warn('buildRequestHeaders failed to read apiKey from storage', e);
+  }
+
+  // 供调试：仅显示是否包含 Authorization，而不打印明文
+  const cleaned = (typeof url === 'string' ? url.trim() : url);
+  try {
+    console.log('buildRequestHeaders -> host', (new URL(cleaned)).host, 'hasAuthorization', !!headers['Authorization']);
+  } catch (e) {
+    console.log('buildRequestHeaders -> url', cleaned, 'hasAuthorization', !!headers['Authorization']);
+  }
+
+  return headers;
+}
+
+// 规范化并清理 base url（去除前后空格与尾部斜杠）
+function normalizeUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
+  return rawUrl.trim().replace(/\/+$/g, '');
 }
 
 // 使用当前 model 生成摘要，返回摘要文本与元数据

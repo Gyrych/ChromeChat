@@ -38,6 +38,8 @@ setx OLLAMA_ORIGINS "chrome-extension://<YOUR_EXTENSION_ID>" -m
 
 3. 打开弹窗，选择模型并开始对话。首次选择模型时会自动创建会话。
 
+关于云端模型：若要使用 Ollama 的云端模型（`https://ollama.com`），请在设置面板中填写 `Ollama API Key`（将保存在 `chrome.storage.local`），并保存。扩展会在请求云端 API 时自动携带 `Authorization: Bearer <API_KEY>` 头。修改 `manifest.json` 后需在 `chrome://extensions` 手动重新加载扩展以应用新权限。
+
 ## 使用说明
 
 - 会话只在两个时刻持久化：用户发送消息后、模型返回完整回答后，以减少频繁写入。

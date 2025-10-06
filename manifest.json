@@ -24,7 +24,8 @@
     "128": "icons/icon128.png"
   },
   "host_permissions": [
-    "http://localhost:11434/*"
+    "http://localhost:11434/*",
+    "https://ollama.com/*"
   ],
   "background": {
     "service_worker": "background.js"

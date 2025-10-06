@@ -68,6 +68,17 @@
 - 2025-10-04 11:20:00 - 实现摘要失败回退：当摘要生成失败时，后台会发送 `summaryFailed` 给 popup，popup 在会话中内嵌提示并继续使用完整历史发送请求。
 - 2025-10-04 11:25:00 - 导出/导入：会话导出已包含 `session.summaries` 字段，保证导入后能还原摘要元数据与原始历史。
 - 2025-10-04 11:30:00 - CURSOR.md 与 PRD 文档已同步更新，记录实现细节与审计要求（每次摘要需记录时间戳与覆盖范围）。
+ - 2025-10-05 16:10:00 - 新增：支持 Ollama 云 API Key 配置并在请求中添加 Authorization 头
+  - 更改文件：`popup.html`, `popup.js`, `background.js`, `manifest.json`
+  - 目的：允许用户通过扩展直接调用 `https://ollama.com` 云端模型并在请求头中包含 `Authorization: Bearer <API_KEY>`，解决扩展无法读取系统环境变量导致的云端认证问题。
+  - 主要实现：
+    - 在 `popup.html` 的设置面板新增 `Ollama API Key` 输入框（`#ollamaApiKey`），类型为 `password`，并保存到 `chrome.storage.local` 的 `ollamaSettings.apiKey`。
+    - 在 `background.js` 中新增 `buildRequestHeaders(url, extraHeaders)` 工具函数：当目标 host 中包含 `ollama.com` 时，从 `chrome.storage.local` 读取 `ollamaSettings.apiKey` 并在 headers 中加入 `Authorization: Bearer <apiKey>`（若存在）。
+    - 将原有直接使用的 `headers: {'Content-Type': 'application/json'}` 替换为通过 `buildRequestHeaders` 构建的 headers，从而统一处理 cloud 与本地请求。
+    - 在 `manifest.json` 中追加 `host_permissions` 条目：`https://ollama.com/*`，以允许扩展向云端发起请求（用户需要手动重新加载扩展以使权限生效）。
+  - 风险与说明：
+    - API Key 将存储在 `chrome.storage.local`（本地浏览器存储），存在一定风险，请用户仅在可信环境下使用并在不需要时删除。
+    - 日志中不会打印明文 API Key，仅输出是否包含 Authorization 标志以便调试。
 
 # 新增功能记录：模型上下文与 token 统计显示 (2025-10-04)
 
