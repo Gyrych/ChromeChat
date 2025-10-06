@@ -9,6 +9,9 @@
 - 名称：Ollama Chrome Assistant
 - 类型：Chrome 扩展（Manifest V3）
 - 功能：在浏览器弹窗中选择本地模型并与本地 Ollama 服务对话，支持会话管理、流式与非流式响应、会话导出/导入与摘要功能。
+ - 名称：Ollama Chrome Assistant
+ - 类型：Chrome 扩展（Manifest V3）
+ - 功能：在浏览器弹窗或侧边栏中选择本地模型并与本地 Ollama 服务对话，支持会话管理、流式与非流式响应、会话导出/导入与摘要功能。
 
 二、目录与关键文件
 
@@ -21,6 +24,7 @@
 三、系统架构概览
 
 - 浏览器弹窗（popup）作为前端展示层，负责用户输入、会话渲染与本地持久化（`chrome.storage.local`）。
+ - 浏览器弹窗（popup）或侧边栏（sidebar）作为前端展示层，负责用户输入、会话渲染与本地持久化（`chrome.storage.local`）。侧边栏在较宽视口下提供更长的会话展示高度与粘性输入区域。
 - `background.js` 作为网络层与控制层，处理与 Ollama 的交互、流式数据解析与中间态存储（当 popup 关闭时，pending 消息会写入 local storage）。
 - 数据持久化：采用 `chrome.storage.local` 存储 session 对象与索引；会话持久化策略为“在用户发送消息后”和“模型返回完整回答后”两处自动保存。
 

@@ -10,13 +10,16 @@
     "scripting"
   ],
   "action": {
-    "default_popup": "popup.html",
     "default_title": "Ollama助手",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
     }
+  },
+  "sidebar_action": {
+    "default_panel": "sidebar.html",
+    "default_title": "Ollama助手（侧边栏）"
   },
   "icons": {
     "16": "icons/icon16.png",
@@ -26,6 +29,13 @@
   "host_permissions": [
     "http://localhost:11434/*",
     "https://ollama.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["sidebar.html", "popup.css", "popup.js"],
+      "matches": ["<all_urls>"],
+      "use_dynamic_url": false
+    }
   ],
   "background": {
     "service_worker": "background.js"

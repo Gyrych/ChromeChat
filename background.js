@@ -60,6 +60,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true; // 始终返回 true 以保持消息通道开放直到 sendResponse 被调用
 });
 
+// 当用户点击扩展图标时，尝试打开侧边栏（若浏览器支持 sidePanel API），否则回退在新标签页打开 sidebar.html
+try {
+  if (chrome && chrome.action && typeof chrome.action.onClicked !== 'undefined') {
+    chrome.action.onClicked.addListener(async (tab) => {
+      try {
+        // 尝试使用 sidePanel API 设置面板并打开（Chrome 目前对 sidePanel 支持有限）
+        if (chrome.sidePanel && typeof chrome.sidePanel.setOptions === 'function') {
+          try {
+            await chrome.sidePanel.setOptions({ path: 'sidebar.html' });
+            // 某些实现还需要显式打开侧边栏（API 名称可能不同），尝试调用 open
+            if (typeof chrome.sidePanel.open === 'function') {
+              try { await chrome.sidePanel.open(); } catch (e) { /* ignore */ }
+            }
+            return;
+          } catch (e) {
+            console.warn('sidePanel.setOptions/open failed, falling back to tab:', e);
+          }
+        }
+
+        // 回退：尝试在当前页面注入侧边栏 content script 切换侧边栏显示
+        try {
+          if (tab && tab.id) {
+            // 尝试以 executeScript 注入（manifest 已声明 web_accessible_resources）
+            await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content_sidebar_inject.js'] });
+            // 发送消息指示 content script 切换侧边栏
+            try { await chrome.tabs.sendMessage(tab.id, { action: 'toggleSidebarInPage' }); } catch (e) { /* ignore */ }
+            return;
+          }
+          await chrome.tabs.create({ url: chrome.runtime.getURL('sidebar.html') });
+        } catch (e) {
+          console.error('fallback open sidebar tab or inject failed:', e);
+        }
+      } catch (err) {
+        console.error('action.onClicked handler error:', err);
+      }
+    });
+  }
+} catch (e) { console.warn('registering action.onClicked failed', e); }
+
 async function testConnection(url, sendResponse) {
   try {
     const headers = await buildRequestHeaders(url, { 'Content-Type': 'application/json' });

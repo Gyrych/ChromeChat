@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ollama 助手（侧边栏）</title>
+    <link rel="stylesheet" href="popup.css">
+    <style>
+        /* 侧边栏常见宽度约为 320-400px，允许在侧栏中更好布局 */
+        html, body { height: 100%; margin: 0; }
+        .container { height: 100vh; box-sizing: border-box; }
+        .chat-container { height: calc(100vh - 220px); overflow: auto; }
+        .input-area { position: sticky; bottom: 0; background: #fff; padding: 8px; }
+    </style>
+</head>
+<body>
+    <!-- 直接复用 popup.html 的主体结构 -->
+    <!-- 为便于复用和维护，脚本仍引用 popup.js，popup.js 中的 DOM 查询应兼容侧边栏布局 -->
+    <div class="container">
+        <!-- 顶部控制栏 -->
+        <div class="header">
+            <div class="header-top">
+                <div class="connection-status">
+                    <span id="statusIndicator" class="status-indicator disconnected"></span>
+                    <span id="statusText">未连接</span>
+                </div>
+                <div class="session-row">
+                    <div class="session-group">
+                        <button id="currentSessionBtn" class="btn secondary" title="管理会话">
+                            <span id="currentSessionText">会话</span>
+                            <span class="dropdown-arrow">▼</span>
+                        </button>
+                        <div id="sessionListPanel" class="session-list hidden"></div>
+                        <div id="sessionMenu" class="session-menu hidden">
+                            <button class="session-menu-item" data-action="new"><span>➕</span> 新建会话</button>
+                            <button class="session-menu-item" data-action="rename"><span>✏️</span> 重命名</button>
+                            <button class="session-menu-item" data-action="export"><span>⬇️</span> 导出</button>
+                            <button class="session-menu-item danger" data-action="delete"><span>🗑️</span> 删除</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="header-bottom">
+                <div class="model-row">
+                    <select id="modelSelect">
+                        <option value="">选择模型...</option>
+                    </select>
+                    <button id="settingsBtn" class="icon-btn">⚙️</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 设置面板 -->
+        <div id="settingsPanel" class="settings-panel hidden">
+            <div class="setting-item">
+                <label for="ollamaUrl">Ollama服务地址:</label>
+                <input type="text" id="ollamaUrl" placeholder="http://localhost:11434" value="http://localhost:11434">
+            </div>
+            <div class="setting-item">
+                <label for="ollamaApiKey">Ollama API Key:</label>
+                <input type="password" id="ollamaApiKey" placeholder="(可选) 用于访问 https://ollama.com 的 API Key">
+            </div>
+            <div class="setting-item">
+                <label class="checkbox-label"><input type="checkbox" id="enableStreaming" checked><span>启用流式响应</span></label>
+                <div class="setting-description">实时显示AI回复，提升交互体验</div>
+            </div>
+            <div class="setting-actions">
+                <button id="testConnection" class="btn secondary">测试连接</button>
+                <button id="saveSettings" class="btn primary">保存设置</button>
+            </div>
+        </div>
+
+        <!-- 对话区域 -->
+        <div id="chatContainer" class="chat-container">
+            <div id="messages" class="messages"></div>
+        </div>
+
+        <div class="footer-info">
+            <div class="model-context"><span id="modelContextLabel">模型上下文:</span><span id="modelContextValue">未知</span></div>
+            <div class="estimate"><span id="estimateLabel">预计 tokens:</span><strong id="nextTurnTokens">0</strong></div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-container">
+                <textarea id="messageInput" placeholder="输入您的问题..." rows="3"></textarea>
+                <div class="input-actions">
+                    <button id="newSessionBtn" class="btn secondary" disabled>新建会话</button>
+                    <button id="fetchAndSendBtn" class="btn secondary" disabled>网页总结</button>
+                    <button id="sendMessage" class="btn primary" disabled>发送</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>
+
+

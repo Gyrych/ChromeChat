@@ -1,6 +1,6 @@
 # Ollama Chrome Assistant
 
-轻量级 Chrome 扩展，在浏览器弹窗中与本地 Ollama 模型快速交互，面向技术工作流设计。支持多轮会话、流式与非流式响应、会话持久化与导出/导入。
+轻量级 Chrome 扩展，在浏览器弹窗或侧边栏中与本地 Ollama 模型快速交互，面向技术工作流设计。支持多轮会话、流式与非流式响应、会话持久化与导出/导入。
 
 ## 功能亮点
 
@@ -12,7 +12,7 @@
 
 ## 架构概览
 
-- 弹窗（UI）：`popup.html`、`popup.css`、`popup.js` — 负责渲染会话、用户交互与本地存储（`chrome.storage.local`）。
+- 弹窗 / 侧边栏（UI）：`popup.html` / `sidebar.html`、`popup.css`、`popup.js` — 负责渲染会话、用户交互与本地存储（`chrome.storage.local`）。侧边栏在较宽视口下会提供更高的消息展示区域与固定输入区。
 - 后台 worker：`background.js` — 与 Ollama 网络交互（`/api/tags`、`/api/chat`、`/api/generate`）、流式解析、摘要生成，并将更新发送给 popup。
 - 存储：会话以 `ollama.session.<id>` 保存，索引保存在 `ollama.sessionIndex`。
 

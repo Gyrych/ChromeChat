@@ -1,6 +1,6 @@
 # Ollama Chrome Assistant
 
-Lightweight Chrome extension that provides a popup UI to interact with local Ollama models. Designed for quick technical workflows, it supports multi-turn sessions, streaming and non-streaming responses, session persistence, and export/import of sessions.
+Lightweight Chrome extension that provides a popup or sidebar UI to interact with local Ollama models. Designed for quick technical workflows, it supports multi-turn sessions, streaming and non-streaming responses, session persistence, and export/import of sessions.
 
 ## Features
 
@@ -12,7 +12,7 @@ Lightweight Chrome extension that provides a popup UI to interact with local Oll
 
 ## Architecture Overview
 
-- Popup (UI): `popup.html`, `popup.css`, `popup.js` — user interface, session rendering, local persistence (`chrome.storage.local`).
+- Popup / Sidebar (UI): `popup.html` / `sidebar.html`, `popup.css`, `popup.js` — user interface, session rendering, local persistence (`chrome.storage.local`).
 - Background worker: `background.js` — network layer to Ollama (`/api/tags`, `/api/chat`, `/api/generate`), stream parsing, summary generation, and bridging updates to popup.
 - Storage: sessions stored as `ollama.session.<id>`; index stored as `ollama.sessionIndex` in `chrome.storage.local`.
 
