@@ -16,9 +16,9 @@
 <body>
     <!-- 直接复用 popup.html 的主体结构 -->
     <!-- 为便于复用和维护，脚本仍引用 popup.js，popup.js 中的 DOM 查询应兼容侧边栏布局 -->
-    <div class="container">
+    <div class="container glass-panel">
         <!-- 顶部控制栏 -->
-        <div class="header">
+        <div class="header glass-panel">
             <div class="header-top">
                 <div class="connection-status">
                     <span id="statusIndicator" class="status-indicator disconnected"></span>
@@ -51,7 +51,7 @@
         </div>
 
         <!-- 设置面板 -->
-        <div id="settingsPanel" class="settings-panel hidden">
+        <div id="settingsPanel" class="settings-panel hidden glass-panel">
             <div class="setting-item">
                 <label for="ollamaUrl">Ollama服务地址:</label>
                 <input type="text" id="ollamaUrl" placeholder="http://localhost:11434" value="http://localhost:11434">
@@ -71,7 +71,7 @@
         </div>
 
         <!-- 对话区域 -->
-        <div id="chatContainer" class="chat-container">
+        <div id="chatContainer" class="chat-container glass-panel">
             <div id="messages" class="messages"></div>
         </div>
 
@@ -80,7 +80,7 @@
             <div class="estimate"><span id="estimateLabel">预计 tokens:</span><strong id="nextTurnTokens">0</strong></div>
         </div>
 
-        <div class="input-area">
+        <div class="input-area glass-panel">
             <div class="input-container">
                 <textarea id="messageInput" placeholder="输入您的问题..." rows="3"></textarea>
                 <div class="input-actions">

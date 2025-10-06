@@ -68,3 +68,5 @@ curl -v -H "Origin: chrome-extension://<YOUR_EXTENSION_ID>" http://localhost:114
 
 - 2025-10-05: Documented OLLAMA_ORIGINS fix and synced docs.
 
+- 2025-10-06: Added a light glassmorphism UI for popup and sidebar to modernize appearance and ensure consistent styling.
+

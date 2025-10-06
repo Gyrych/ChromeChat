@@ -7,9 +7,9 @@
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-    <div class="container">
+    <div class="container glass-panel">
         <!-- 顶部控制栏 -->
-        <div class="header">
+        <div class="header glass-panel">
             <div class="header-top">
                 <div class="connection-status">
                     <span id="statusIndicator" class="status-indicator disconnected"></span>
@@ -52,7 +52,7 @@
         </div>
 
         <!-- 设置面板 -->
-        <div id="settingsPanel" class="settings-panel hidden">
+        <div id="settingsPanel" class="settings-panel hidden glass-panel">
             <div class="setting-item">
                 <label for="ollamaUrl">Ollama服务地址:</label>
                 <input type="text" id="ollamaUrl" placeholder="http://localhost:11434" value="http://localhost:11434">
@@ -75,7 +75,7 @@
         </div>
 
         <!-- 对话区域 -->
-        <div id="chatContainer" class="chat-container">
+        <div id="chatContainer" class="chat-container glass-panel">
             <div id="messages" class="messages"></div>
         </div>
 
@@ -92,7 +92,7 @@
         </div>
 
         <!-- 输入区域 -->
-        <div class="input-area">
+        <div class="input-area glass-panel">
             <div class="input-container">
                 <textarea id="messageInput" placeholder="输入您的问题..." rows="3"></textarea>
                 <div class="input-actions">
