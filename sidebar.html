@@ -16,7 +16,7 @@
 <body>
     <!-- 直接复用 popup.html 的主体结构 -->
     <!-- 为便于复用和维护，脚本仍引用 popup.js，popup.js 中的 DOM 查询应兼容侧边栏布局 -->
-    <div class="container glass-panel">
+    <div class="container glass-panel" style="width:520px; min-width:520px; max-width:520px;">
         <!-- 顶部控制栏 -->
         <div class="header glass-panel">
             <div class="header-top">
@@ -42,9 +42,6 @@
             </div>
             <div class="header-bottom">
                 <div class="model-row">
-                    <select id="modelSelect">
-                        <option value="">选择模型...</option>
-                    </select>
                     <button id="settingsBtn" class="icon-btn">⚙️</button>
                 </div>
             </div>
@@ -61,6 +58,12 @@
                 <input type="password" id="ollamaApiKey" placeholder="(可选) 用于访问 https://ollama.com 的 API Key">
             </div>
             <div class="setting-item">
+                <label for="modelSelect">选择模型:</label>
+                <select id="modelSelect">
+                    <option value="">选择模型...</option>
+                </select>
+            </div>
+            <div class="setting-item">
                 <label class="checkbox-label"><input type="checkbox" id="enableStreaming" checked><span>启用流式响应</span></label>
                 <div class="setting-description">实时显示AI回复，提升交互体验</div>
             </div>
@@ -72,7 +75,16 @@
 
         <!-- 对话区域 -->
         <div id="chatContainer" class="chat-container glass-panel">
-            <div id="messages" class="messages"></div>
+            <div class="chat-wrapper">
+                <div class="chat-main">
+                    <div id="messages" class="messages"></div>
+                </div>
+                <div class="chat-toolbar" aria-label="对话工具栏">
+                    <button id="fetchAndSendBtn" class="btn secondary" disabled title="网页总结">
+                        <span class="icon-summary">📝</span>
+                    </button>
+                </div>
+            </div>
         </div>
 
         <div class="footer-info">
@@ -81,14 +93,13 @@
         </div>
 
         <div class="input-area glass-panel">
-            <div class="input-container">
-                <textarea id="messageInput" placeholder="输入您的问题..." rows="3"></textarea>
-                <div class="input-actions">
-                    <button id="newSessionBtn" class="btn secondary" disabled>新建会话</button>
-                    <button id="fetchAndSendBtn" class="btn secondary" disabled>网页总结</button>
-                    <button id="sendMessage" class="btn primary" disabled>发送</button>
+                <div class="input-container">
+                    <textarea id="messageInput" placeholder="输入您的问题..." rows="3"></textarea>
+                    <div class="input-actions">
+                        <button id="newSessionBtn" class="btn secondary" disabled>新建会话</button>
+                        <button id="sendMessage" class="btn primary" disabled>发送</button>
+                    </div>
                 </div>
-            </div>
         </div>
     </div>
 

@@ -20,6 +20,7 @@
 - `manifest.json`：扩展清单（权限、host_permissions、service_worker）。
 - `doc/PRD_会话管理与上下文_zh.md`：会话管理 PRD 与设计决策。
 - `CURSOR.md`：本文件（项目记忆与变更记录）。
+ - `doc/PRD_侧边栏自适应与右侧按钮_zh.md`：侧边栏自适应宽度与对话窗格右侧工具栏 PRD（本次新增）。
 
 三、系统架构概览
 

@@ -68,5 +68,7 @@ curl -v -H "Origin: chrome-extension://<YOUR_EXTENSION_ID>" http://localhost:114
 
 - 2025-10-05: 记录并修复 Ollama 白名单导致的 403 问题，更新文档。
 
-- 2025-10-06: 增加浅色毛玻璃界面（glassmorphism），统一弹窗与侧边栏视觉风格，提升现代感。
+ - 2025-10-06: 增加浅色毛玻璃界面（glassmorphism），统一弹窗与侧边栏视觉风格，提升现代感。
+
+- 2025-10-06: 新增 PRD 与实现计划：侧边栏自适应宽度与对话窗格右侧工具栏（将 `popup.css` 固定宽度替换为响应式，新增 `.chat-wrapper` 与 `.chat-toolbar`，并把“网页总结”按钮移到右侧工具栏）。
 

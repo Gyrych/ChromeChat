@@ -43,9 +43,6 @@
             </div>
             <div class="header-bottom">
                 <div class="model-row">
-                    <select id="modelSelect">
-                        <option value="">选择模型...</option>
-                    </select>
                     <button id="settingsBtn" class="icon-btn">⚙️</button>
                 </div>
             </div>
@@ -62,6 +59,12 @@
                 <input type="password" id="ollamaApiKey" placeholder="(可选) 用于访问 https://ollama.com 的 API Key">
             </div>
             <div class="setting-item">
+                <label for="modelSelect">选择模型:</label>
+                <select id="modelSelect">
+                    <option value="">选择模型...</option>
+                </select>
+            </div>
+            <div class="setting-item">
                 <label class="checkbox-label">
                     <input type="checkbox" id="enableStreaming" checked>
                     <span>启用流式响应</span>
@@ -76,7 +79,17 @@
 
         <!-- 对话区域 -->
         <div id="chatContainer" class="chat-container glass-panel">
-            <div id="messages" class="messages"></div>
+            <div class="chat-wrapper">
+                <div class="chat-main">
+                    <div id="messages" class="messages"></div>
+                </div>
+                <div class="chat-toolbar" aria-label="对话工具栏">
+                    <button id="fetchAndSendBtn" class="btn secondary" disabled title="网页总结">
+                        <span class="icon-summary">📝</span>
+                    </button>
+                    <!-- 预留其他按钮位置 -->
+                </div>
+            </div>
         </div>
 
         <!-- 底部：模型最大上下文与下一回合预计 tokens -->
@@ -93,14 +106,13 @@
 
         <!-- 输入区域 -->
         <div class="input-area glass-panel">
-            <div class="input-container">
-                <textarea id="messageInput" placeholder="输入您的问题..." rows="3"></textarea>
-                <div class="input-actions">
-                    <button id="newSessionBtn" class="btn secondary" disabled>新建会话</button>
-                    <button id="fetchAndSendBtn" class="btn secondary" disabled>网页总结</button>
-                    <button id="sendMessage" class="btn primary" disabled>发送</button>
+                <div class="input-container">
+                    <textarea id="messageInput" placeholder="输入您的问题..." rows="3"></textarea>
+                    <div class="input-actions">
+                        <button id="newSessionBtn" class="btn secondary" disabled>新建会话</button>
+                        <button id="sendMessage" class="btn primary" disabled>发送</button>
+                    </div>
                 </div>
-            </div>
         </div>
     </div>
 

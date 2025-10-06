@@ -251,7 +251,15 @@ class OllamaAssistant {
 
         if (this.clearChatBtn) this.clearChatBtn.addEventListener('click', () => this.handleClearConversation());
         if (this.newSessionBtn) this.newSessionBtn.addEventListener('click', () => this.handleNewSessionButSavePrevious());
-        if (this.fetchAndSendBtn) this.fetchAndSendBtn.addEventListener('click', () => this.handleFetchAndSend());
+        if (this.fetchAndSendBtn) {
+            this.fetchAndSendBtn.addEventListener('click', () => this.handleFetchAndSend());
+            // 简易 tooltip：使用 title 属性已在 DOM 中设置，增强无障碍
+            this.fetchAndSendBtn.addEventListener('mouseenter', (e) => {
+                // 可在未来扩展为更复杂的 tooltip 实现
+                const el = e.currentTarget;
+                if (el && !el.dataset._hasTooltip) el.dataset._hasTooltip = '1';
+            });
+        }
 
         // 会话管理事件
         // 原生下拉已移除，保留该逻辑注释以便将来需要时恢复
