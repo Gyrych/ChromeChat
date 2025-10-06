@@ -268,7 +268,9 @@ class OllamaAssistant {
         if (this.currentSessionBtn) this.currentSessionBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             console.debug('currentSessionBtn clicked');
+            // 和设置按钮一致的行为：切换对应面板并更新 aria 状态
             this.toggleSessionList();
+            try { this.currentSessionBtn.setAttribute('aria-expanded', String(!this.sessionListPanel.classList.contains('hidden'))); } catch (err) { /* ignore */ }
         });
         // 使用捕获阶段监听，保证即使面板内部阻止了冒泡也能正确判断点击位置并关闭面板
         document.addEventListener('click', (e) => this.handleGlobalClickForMenus(e), true);
@@ -393,11 +395,64 @@ class OllamaAssistant {
     }
 
     toggleSettings() {
-        this.settingsPanel.classList.toggle('hidden');
+        if (!this.settingsPanel) return;
+        const panel = this.settingsPanel;
+        const isHidden = panel.classList.contains('hidden');
+        if (isHidden) {
+            panel.classList.remove('hidden');
+            panel.style.display = 'block';
+            panel.style.zIndex = '9999';
+            panel.setAttribute('aria-hidden', 'false');
+            try { this.settingsBtn.setAttribute('aria-expanded', 'true'); } catch (e) { /* ignore */ }
+            try { this.adjustFloatingPanelPosition(panel, this.settingsBtn); } catch (e) { /* ignore */ }
+        } else {
+            panel.classList.add('hidden');
+            panel.style.display = '';
+            panel.style.zIndex = '';
+            panel.setAttribute('aria-hidden', 'true');
+            try { this.settingsBtn.setAttribute('aria-expanded', 'false'); } catch (e) { /* ignore */ }
+        }
     }
 
     hideSettings() {
+        if (!this.settingsPanel) return;
         this.settingsPanel.classList.add('hidden');
+        this.settingsPanel.style.display = '';
+        this.settingsPanel.style.zIndex = '';
+        try { this.settingsPanel.setAttribute('aria-hidden', 'true'); } catch (e) { /* ignore */ }
+        try { this.settingsBtn.setAttribute('aria-expanded', 'false'); } catch (e) { /* ignore */ }
+    }
+
+    // 计算并调整任意浮层面板（如 settingsPanel）的显示位置，使其靠近对应按钮并避免溢出
+    adjustFloatingPanelPosition(panel, anchorBtn) {
+        if (!panel || !anchorBtn) return;
+        try {
+            const btnRect = anchorBtn.getBoundingClientRect();
+            const panelRect = panel.getBoundingClientRect();
+            const viewportW = document.documentElement.clientWidth || window.innerWidth;
+            const viewportH = document.documentElement.clientHeight || window.innerHeight;
+
+            // 默认左对齐按钮左侧
+            let left = Math.max(8, btnRect.left);
+            // 如果会溢出右侧，则右对齐到按钮右侧
+            if (left + panelRect.width + 8 > viewportW) {
+                left = Math.max(8, btnRect.right - panelRect.width);
+            }
+
+            // 优先放在按钮下方，否则放在上方
+            let top = btnRect.bottom + 8;
+            if (top + panelRect.height + 8 > viewportH) {
+                top = Math.max(8, btnRect.top - panelRect.height - 8);
+            }
+
+            // 采用 absolute 定位，使 panel 相对于文档定位
+            panel.style.position = 'absolute';
+            panel.style.left = `${Math.round(left)}px`;
+            panel.style.top = `${Math.round(top)}px`;
+            panel.style.right = 'auto';
+        } catch (e) {
+            console.warn('adjustFloatingPanelPosition failed:', e);
+        }
     }
 
     updateStatus(status, text) {
@@ -1194,44 +1249,52 @@ class OllamaAssistant {
         const panel = this.sessionListPanel;
         const isHidden = panel.classList.contains('hidden');
         if (isHidden) {
-            console.debug('Showing session list panel');
+            console.debug('Showing session list panel (inline dropdown)');
             // refreshSessionListPanel may be async; call it and ignore await to keep this method sync
             this.refreshSessionListPanel().then(() => {
+                // 为避免被父级的毛玻璃影响，将 panel 暂时移动到 document.body（portal），与 settingsPanel 相同的层级
+                try {
+                    if (panel.parentElement !== document.body) {
+                        // 记录原始位置以便关闭时还原
+                        panel.dataset._orig_parent_id = '1';
+                        panel.dataset._had_parent = '1';
+                        panel._origParent = panel.parentElement;
+                        panel._origNextSibling = panel.nextSibling;
+                        document.body.appendChild(panel);
+                    }
+                } catch (e) { /* ignore */ }
+
                 panel.classList.remove('hidden');
-                // 强制设置显示样式并提高 z-index 以防被覆盖
+                // 与 settings 面板一致的显示样式
                 panel.style.display = 'flex';
                 panel.style.zIndex = '9999';
-                // 调整位置以防超出弹窗右侧
-                this.adjustSessionListPosition();
-
-                // 添加遮罩以捕获外部点击并关闭面板（避免其他元素阻止冒泡导致无法关闭）
-                if (!this._sessionListBackdrop) {
-                    const backdrop = document.createElement('div');
-                    backdrop.id = 'session-list-backdrop';
-                    backdrop.style.position = 'fixed';
-                    backdrop.style.left = '0';
-                    backdrop.style.top = '0';
-                    backdrop.style.width = '100%';
-                    backdrop.style.height = '100%';
-                    backdrop.style.background = 'transparent';
-                    backdrop.style.zIndex = '9998';
-                    backdrop.addEventListener('click', () => { this.hideSessionList(); });
-                    this._sessionListBackdrop = backdrop;
-                    // 将 backdrop 插入到 panel 之前
-                    const container = document.body || document.documentElement;
-                    container.appendChild(backdrop);
-                }
+                panel.setAttribute('aria-hidden', 'false');
+                // 使用绝对定位并靠近触发按钮
+                panel.style.position = 'absolute';
+                this.adjustFloatingPanelPosition(panel, this.currentSessionBtn);
+                // 提升渲染上下文，避免被 backdrop-filter 影响
+                panel.style.backdropFilter = 'none';
+                panel.style.webkitBackdropFilter = 'none';
+                panel.style.filter = 'none';
             }).catch((e) => { console.warn('refreshSessionListPanel failed:', e); panel.classList.remove('hidden'); });
         } else {
             console.debug('Hiding session list panel');
             panel.classList.add('hidden');
             panel.style.display = '';
             panel.style.zIndex = '';
-            // 移除遮罩
-            if (this._sessionListBackdrop) {
-                try { this._sessionListBackdrop.remove(); } catch (e) { /* ignore */ }
-                this._sessionListBackdrop = null;
-            }
+            panel.setAttribute('aria-hidden', 'true');
+            // 若之前移动到了 document.body，则还原到原始父节点
+            try {
+                if (panel._origParent) {
+                    const parent = panel._origParent;
+                    const next = panel._origNextSibling;
+                    if (next) parent.insertBefore(panel, next); else parent.appendChild(panel);
+                    // 清理临时引用
+                    panel._origParent = null;
+                    panel._origNextSibling = null;
+                    delete panel.dataset._had_parent;
+                }
+            } catch (e) { /* ignore */ }
         }
     }
 

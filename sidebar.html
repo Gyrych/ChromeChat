@@ -17,32 +17,34 @@
     <!-- 直接复用 popup.html 的主体结构 -->
     <!-- 为便于复用和维护，脚本仍引用 popup.js，popup.js 中的 DOM 查询应兼容侧边栏布局 -->
     <div class="container glass-panel" style="width:520px; min-width:520px; max-width:520px;">
-        <!-- 顶部控制栏 -->
+        <!-- 顶部控制栏：横向排列应用图标、连接状态、设置、会话历史 -->
         <div class="header glass-panel">
-            <div class="header-top">
+            <div class="header-top horizontal-top">
+                <div class="app-icon-area">
+                    <img src="icons/icon48.png" alt="App" class="app-icon">
+                </div>
+
                 <div class="connection-status">
                     <span id="statusIndicator" class="status-indicator disconnected"></span>
                     <span id="statusText">未连接</span>
                 </div>
-                <div class="session-row">
+
+                <div class="header-actions">
+                    <button id="settingsBtn" class="icon-btn" title="设置" aria-expanded="false" aria-controls="settingsPanel">⚙️</button>
                     <div class="session-group">
-                        <button id="currentSessionBtn" class="btn secondary" title="管理会话">
-                            <span id="currentSessionText">会话</span>
-                            <span class="dropdown-arrow">▼</span>
+                        <!-- 历史会话改为图标按钮，与设置按钮样式一致；会话名称保留为无障碍文本 -->
+                        <button id="currentSessionBtn" class="icon-btn" title="会话历史" aria-expanded="false" aria-controls="sessionListPanel">
+                            <span class="icon-history">🗂️</span>
+                            <span id="currentSessionText" class="sr-only">会话</span>
                         </button>
-                        <div id="sessionListPanel" class="session-list hidden"></div>
-                        <div id="sessionMenu" class="session-menu hidden">
+                        <div id="sessionListPanel" class="session-list hidden" aria-hidden="true"></div>
+                        <div id="sessionMenu" class="session-menu hidden" aria-hidden="true">
                             <button class="session-menu-item" data-action="new"><span>➕</span> 新建会话</button>
                             <button class="session-menu-item" data-action="rename"><span>✏️</span> 重命名</button>
                             <button class="session-menu-item" data-action="export"><span>⬇️</span> 导出</button>
                             <button class="session-menu-item danger" data-action="delete"><span>🗑️</span> 删除</button>
                         </div>
                     </div>
-                </div>
-            </div>
-            <div class="header-bottom">
-                <div class="model-row">
-                    <button id="settingsBtn" class="icon-btn">⚙️</button>
                 </div>
             </div>
         </div>

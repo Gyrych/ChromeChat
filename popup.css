@@ -54,8 +54,9 @@ body {
     background: white;
     border-bottom: 1px solid #e6e6e6;
     display: flex;
-    flex-direction: column;
-    gap: 8px;
+    flex-direction: row; /* 顶部改为横向 */
+    align-items: center;
+    gap: 12px;
 }
 
 .connection-status {
@@ -74,7 +75,13 @@ body {
 
 /* 隐藏连接状态的文字，只保留指示器 */
 .connection-status #statusText {
-    display: none;
+    /* 当侧边栏顶部空间充足时显示文字，否则通过 media query 隐藏 */
+    display: inline-block;
+}
+
+/* 在较窄视口收缩时隐藏文字，仅显示指示器 */
+@media (max-width: 420px) {
+    .connection-status #statusText { display: none; }
 }
 
 .status-indicator.connected {
@@ -117,6 +124,26 @@ body {
     width: 100%;
     justify-content: space-between;
     align-items: center;
+}
+
+.horizontal-top { display: flex; align-items: center; gap: 12px; width: 100%; }
+
+.app-icon-area { display: flex; align-items: center; }
+.app-icon { width: 36px; height: 36px; border-radius: 6px; }
+
+.header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+/* 无障碍隐藏文本，仅供屏幕阅读器使用 */
+.sr-only {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
 }
 
 /* 头部第二行：模型选择与设置 */
@@ -237,24 +264,32 @@ body {
 }
 
 .session-list {
-    position: absolute;
+    position: absolute; /* 内嵌下拉，相对于 .session-group 定位 */
     right: 8px;
     top: 36px;
-    background: #fff;
-    border: 1px solid #ddd;
+    /* 使用不透明白底并禁用任何 backdrop/filter，避免被父级毛玻璃模糊 */
+    background: #ffffff;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    filter: none !important;
+    border: 1px solid rgba(34,34,34,0.06);
     border-radius: 8px;
-    padding: 6px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
     gap: 6px;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.12);
-    z-index: 9999; /* 提高优先级，防止被其他元素覆盖 */
+    box-shadow: 0 10px 30px rgba(0,0,0,0.14);
+    z-index: 9999; /* 内嵌层级，避免使用全局最大值 */
     min-width: 260px;
     max-height: 300px;
     overflow: auto;
 }
 
 .session-list.hidden { display: none; }
+
+/* 会话条目显示完整信息（换行、显示时间等） */
+.session-item div:first-child { white-space: normal; overflow: visible; text-overflow: clip; }
+.session-item .session-meta { font-size: 12px; color: #666; margin-top: 6px; }
 
 .session-item {
     display: flex;
@@ -284,9 +319,19 @@ body {
 
 /* 设置面板 */
 .settings-panel {
+    /* 统一为内嵌下拉样式，与会话列表一致 */
+    position: absolute;
+    right: 8px;
+    top: 36px;
     padding: 12px;
-    background: white;
-    border-bottom: 1px solid #e0e0e0;
+    background: rgba(255,255,255,0.98);
+    border: 1px solid rgba(34,34,34,0.06);
+    border-radius: 8px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+    z-index: 9999;
+    min-width: 320px;
+    max-height: 60vh;
+    overflow: auto;
 }
 
 .settings-panel.hidden {
@@ -412,7 +457,9 @@ input[type="text"]:focus, input[type="password"]:focus, select:focus, textarea:f
 
 /* 滑条（range）现代风格 */
 input[type="range"] {
+    appearance: none;
     -webkit-appearance: none;
+    -moz-appearance: none;
     width: 100%;
     height: 6px;
     background: rgba(0,0,0,0.06);
