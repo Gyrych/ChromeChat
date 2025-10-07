@@ -584,6 +584,24 @@ input[type="range"]::-webkit-slider-thumb {
     font-size: 13px;
     line-height: 1.4;
     word-break: break-word;
+    /* 确保子元素（如 <ul>, <ol>）在气泡内正确换行并不超出父容器 */
+    overflow-wrap: anywhere; /* 在单词过长或特殊符号（·）时允许在任意位置断行 */
+}
+
+/* 列表项在气泡内样式：限制宽度、允许换行、移除超出隐藏导致的水平滚动 */
+.message ul, .message ol {
+    margin: 6px 0 6px 18px; /* 保持缩进，但不导致溢出 */
+    padding-left: 18px;
+    max-width: 100%;
+    overflow-wrap: break-word;
+}
+
+.message li {
+    display: list-item;
+    list-style-position: outside;
+    white-space: normal; /* 允许换行 */
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 /* 确保在 flex 容器内正确收缩，避免溢出导致空白 */

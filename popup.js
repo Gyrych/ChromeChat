@@ -55,31 +55,66 @@ class ChromeChatAssistant {
             return `<pre><code>${code}</code></pre>`;
         });
 
-        // 行内代码
+        // 行内格式（代码/加粗/斜体/链接）
         s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
         s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
         s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
         s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, text, url) => {
             const safeUrl = this.escapeHtml(url);
             return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${text}</a>`;
         });
 
         const lines = s.split(/\r?\n/);
-        let inList = false;
+        // inList: null | 'ul' | 'ol'
+        let inList = null;
         const out = [];
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            const m = line.match(/^\s*[-*+]\s+(.*)$/);
-            if (m) {
-                if (!inList) { out.push('<ul>'); inList = true; }
-                out.push(`<li>${m[1]}</li>`);
+
+            // 标题支持：# ... ######
+            const h = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
+            if (h) {
+                if (inList) { out.push(inList === 'ul' ? '</ul>' : '</ol>'); inList = null; }
+                const level = Math.min(6, h[1].length);
+                out.push(`<h${level}>${h[2]}</h${level}>`);
+                continue;
+            }
+
+            // 引用块支持：> ...
+            const bq = line.match(/^\s*>\s+(.*)$/);
+            if (bq) {
+                if (inList) { out.push(inList === 'ul' ? '</ul>' : '</ol>'); inList = null; }
+                out.push(`<blockquote>${bq[1]}</blockquote>`);
+                continue;
+            }
+
+            // 有序列表：1. item
+            const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+            if (ol) {
+                if (inList !== 'ol') { if (inList) out.push(inList === 'ul' ? '</ul>' : '</ol>'); out.push('<ol>'); inList = 'ol'; }
+                out.push(`<li>${ol[1]}</li>`);
+                continue;
+            }
+
+            // 无序列表：-, *, +, 或者常见的 '•'、'·'
+            const ul = line.match(/^\s*(?:[-*+]|[•·])\s+(.*)$/);
+            if (ul) {
+                if (inList !== 'ul') { if (inList) out.push(inList === 'ul' ? '</ul>' : '</ol>'); out.push('<ul>'); inList = 'ul'; }
+                out.push(`<li>${ul[1]}</li>`);
+                continue;
+            }
+
+            // 非列表行：如果当前处于列表中，先关闭列表
+            if (inList) { out.push(inList === 'ul' ? '</ul>' : '</ol>'); inList = null; }
+
+            if (line.trim() === '') {
+                // 保留一个空行渲染为换行，避免连续多行产生大量 <br>
+                out.push('<br>');
             } else {
-                if (inList) { out.push('</ul>'); inList = false; }
-                if (line.trim() === '') out.push('<br>'); else out.push(`<p>${line}</p>`);
+                out.push(`<p>${line}</p>`);
             }
         }
-        if (inList) out.push('</ul>');
+        if (inList) out.push(inList === 'ul' ? '</ul>' : '</ol>');
         return out.join('');
     }
 
