@@ -93,6 +93,17 @@
         iframe.style.border = '0';
         iframe.style.background = 'white';
         iframe.style.boxShadow = '0 0 12px rgba(0,0,0,0.12)';
+        // 确保 iframe 加载后，将 body 标记为 sidebar 模式，以便 CSS 中的
+        // `body:not(.sidebar)` 规则不会限制其宽度，从而允许注入容器调整大小
+        iframe.addEventListener('load', () => {
+            try {
+                const docBody = iframe.contentDocument && iframe.contentDocument.body;
+                if (docBody && !docBody.classList.contains('sidebar')) docBody.classList.add('sidebar');
+            } catch (e) {
+                // 跨域或其它原因无法访问 iframe 内容时不抛出错误，仅记录
+                console.warn('Could not set sidebar class on iframe body', e);
+            }
+        });
 
         // 组装
         if (isNarrowViewport) {
@@ -107,19 +118,28 @@
 
         document.documentElement.appendChild(container);
 
-        // 拖拽逻辑
+        // 拖拽逻辑（改进以防止在向右拖拽时被 iframe 或页面元素中断）
         let dragging = false;
-        let startX = 0, startY = 0, startW = 0, startH = 0;
+        let startX = 0, startY = 0, startW = 0, startH = 0, startPointerId = null;
         function onPointerDown(e) {
             e.preventDefault();
             dragging = true;
+            startPointerId = e.pointerId;
             startX = e.clientX;
             startY = e.clientY;
             const rect = container.getBoundingClientRect();
             startW = rect.width;
             startH = rect.height;
+
+            // 使 resizer 捕获指针，保证在 pointer 移动到 iframe 或其它元素上时仍能接收事件
+            try { if (resizer.setPointerCapture) resizer.setPointerCapture(startPointerId); } catch (err) { /* ignore */ }
+
+            // 在拖拽期间禁用 iframe 的 pointer events，避免 iframe 拦截指针导致移动中断
+            try { iframe.style.pointerEvents = 'none'; } catch (err) { /* ignore */ }
+
             document.addEventListener('pointermove', onPointerMove);
             document.addEventListener('pointerup', onPointerUp);
+            document.addEventListener('pointercancel', onPointerUp);
         }
 
         function onPointerMove(e) {
@@ -143,10 +163,18 @@
             }
         }
 
-        function onPointerUp() {
+        function onPointerUp(e) {
             dragging = false;
+            // 恢复 iframe 的 pointer events
+            try { iframe.style.pointerEvents = ''; } catch (err) { /* ignore */ }
+
+            // 释放指针捕获
+            try { if (startPointerId !== null && resizer.releasePointerCapture) resizer.releasePointerCapture(startPointerId); } catch (err) { /* ignore */ }
+            startPointerId = null;
+
             document.removeEventListener('pointermove', onPointerMove);
             document.removeEventListener('pointerup', onPointerUp);
+            document.removeEventListener('pointercancel', onPointerUp);
         }
 
         resizer.addEventListener('pointerdown', onPointerDown);
