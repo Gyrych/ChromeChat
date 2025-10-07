@@ -31,11 +31,13 @@
                 </div>
 
                 <div class="header-actions">
-                    <button id="settingsBtn" class="icon-btn" title="设置" aria-expanded="false" aria-controls="settingsPanel">⚙️</button>
+                    <button id="settingsBtn" class="icon-btn" title="设置" aria-expanded="false" aria-controls="settingsPanel">
+                        <img src="icons/s-tools.png" alt="设置" class="icon-settings-img" />
+                    </button>
                     <div class="session-group">
                         <!-- 历史会话改为图标按钮，与设置按钮样式一致；会话名称保留为无障碍文本 -->
                         <button id="currentSessionBtn" class="icon-btn" title="会话历史" aria-expanded="false" aria-controls="sessionListPanel">
-                            <span class="icon-history">🗂️</span>
+                            <img src="icons/files.png" alt="会话历史" class="icon-session-history-img" />
                             <span id="currentSessionText" class="sr-only">会话</span>
                         </button>
                         <div id="sessionListPanel" class="session-list hidden" aria-hidden="true"></div>
@@ -83,12 +85,25 @@
                     <div id="messages" class="messages"></div>
                 </div>
                 <div class="chat-toolbar" aria-label="对话工具栏">
-                    <button id="fetchAndSendBtn" class="btn secondary" disabled title="网页总结">
-                        <span class="icon-summary">📝</span>
-                    </button>
+                    <div class="toolbar-item">
+                        <button id="fetchAndSendBtn" class="btn secondary" disabled title="网页总结">
+                            <img src="icons/document.png" alt="网页总结" class="icon-summary-img" />
+                        </button>
+                        <span class="toolbar-label">网页总结</span>
+                    </div>
                     <!-- 预留位置：更多工具按钮 -->
-                    <button id="toolBtn1" class="btn secondary" title="工具1">🔧</button>
-                    <button id="toolBtn2" class="btn secondary" title="工具2">⭐</button>
+                    <div class="toolbar-item">
+                        <button id="toolBtn1" class="btn secondary" title="工具1">
+                            <img src="icons/Language.png" alt="工具1" class="icon-tool1-img" />
+                        </button>
+                        <span class="toolbar-label">工具1</span>
+                    </div>
+                    <div class="toolbar-item">
+                        <button id="toolBtn2" class="btn secondary" title="工具2">
+                            <img src="icons/star.png" alt="工具2" class="icon-tool2-img" />
+                        </button>
+                        <span class="toolbar-label">工具2</span>
+                    </div>
                 </div>
             </div>
         </div>

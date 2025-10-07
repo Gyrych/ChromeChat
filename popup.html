@@ -43,7 +43,9 @@
             </div>
             <div class="header-bottom">
                 <div class="model-row">
-                    <button id="settingsBtn" class="icon-btn">⚙️</button>
+                    <button id="settingsBtn" class="icon-btn">
+                        <img src="icons/s-tools.png" alt="设置" class="icon-settings-img" />
+                    </button>
                 </div>
             </div>
         </div>
@@ -84,10 +86,24 @@
                     <div id="messages" class="messages"></div>
                 </div>
                 <div class="chat-toolbar" aria-label="对话工具栏">
-                    <button id="fetchAndSendBtn" class="btn secondary" disabled title="网页总结">
-                        <span class="icon-summary">📝</span>
-                    </button>
-                    <!-- 预留其他按钮位置 -->
+                    <div class="toolbar-item">
+                        <button id="fetchAndSendBtn" class="btn secondary" disabled title="网页总结">
+                            <img src="icons/document.png" alt="网页总结" class="icon-summary-img" />
+                        </button>
+                        <span class="toolbar-label">网页总结</span>
+                    </div>
+                    <div class="toolbar-item">
+                        <button id="toolBtn1" class="btn secondary" title="工具1">
+                            <img src="icons/Language.png" alt="工具1" class="icon-tool1-img" />
+                        </button>
+                        <span class="toolbar-label">工具1</span>
+                    </div>
+                    <div class="toolbar-item">
+                        <button id="toolBtn2" class="btn secondary" title="工具2">
+                            <img src="icons/star.png" alt="工具2" class="icon-tool2-img" />
+                        </button>
+                        <span class="toolbar-label">工具2</span>
+                    </div>
                 </div>
             </div>
         </div>

@@ -524,7 +524,7 @@ input[type="range"]::-webkit-slider-thumb {
     width: 56px; /* 工具栏宽度 */
     display: flex;
     flex-direction: column;
-    gap: 10px; /* 垂直间距更均衡 */
+    gap: 20px; /* 垂直间距加大一倍 */
     align-items: center;
     padding: 6px 6px;
     /* 固定在侧边栏视口中的位置，不随对话滚动 */
@@ -545,6 +545,28 @@ input[type="range"]::-webkit-slider-thumb {
 .chat-toolbar .icon-summary {
     width: 16px;
     height: 16px;
+}
+
+/* 工具栏项：包含按钮与下方标签 */
+.chat-toolbar .toolbar-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+.chat-toolbar .toolbar-label {
+    font-size: 11px;
+    color: #333;
+    text-align: center;
+    display: block;
+    width: 64px; /* 保证标签宽度与工具栏视觉一致 */
+}
+
+/* 图标图片统一尺寸 */
+.chat-toolbar img[class$="-img"] {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
 }
 
 .messages {

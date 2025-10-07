@@ -3,7 +3,8 @@ class OllamaAssistant {
         this.settings = {
             ollamaUrl: 'http://localhost:11434',
             enableStreaming: true,
-            apiKey: ''
+            apiKey: '',
+            defaultModel: ''
         };
         this.currentModel = '';
         // 仅用于UI显示的临时历史，真实持久化在会话对象中
@@ -203,6 +204,8 @@ class OllamaAssistant {
             this.ollamaUrlInput.value = this.settings.ollamaUrl;
             this.enableStreamingCheckbox.checked = this.settings.enableStreaming;
             if (this.ollamaApiKeyInput) this.ollamaApiKeyInput.value = this.settings.apiKey || '';
+            // 如果存储了默认模型，则在模型列表加载完成后设置为选中
+            this._storedDefaultModel = this.settings.defaultModel || '';
         }
     }
 
@@ -210,6 +213,10 @@ class OllamaAssistant {
         this.settings.ollamaUrl = this.ollamaUrlInput.value;
         this.settings.enableStreaming = this.enableStreamingCheckbox.checked;
         if (this.ollamaApiKeyInput) this.settings.apiKey = this.ollamaApiKeyInput.value;
+        // 保存用户选择的默认模型（通过 "保存设置" 按钮）
+        try {
+            if (this.modelSelect) this.settings.defaultModel = this.modelSelect.value || (this.settings.defaultModel || '');
+        } catch (e) { /* ignore */ }
         await chrome.storage.local.set({
             ollamaSettings: this.settings
         });
@@ -534,6 +541,18 @@ class OllamaAssistant {
 
             if (response && response.success) {
                 this.populateModelSelect(response.models);
+                // 如果之前保存了默认模型并在列表中存在，选择它
+                try {
+                    if (this._storedDefaultModel && this._storedDefaultModel.length) {
+                        const found = response.models.find(m => m.name === this._storedDefaultModel);
+                        if (found && this.modelSelect) {
+                            this.modelSelect.value = this._storedDefaultModel;
+                            // 触发 change 处理以同步 UI 状态
+                            const ev = new Event('change');
+                            this.modelSelect.dispatchEvent(ev);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
             } else {
                 throw new Error((response && response.message) ? response.message : '后台无响应');
             }
