@@ -138,6 +138,8 @@ class OllamaAssistant {
         this.sendMessageBtn = document.getElementById('sendMessage');
         this.clearChatBtn = document.getElementById('clearChat');
         this.fetchAndSendBtn = document.getElementById('fetchAndSendBtn');
+        // 停止按钮（用于中断正在进行的生成）
+        this.stopMessageBtn = document.getElementById('stopMessageBtn');
         // 底部显示元素：模型上下文与预计 tokens
         this.modelContextValue = document.getElementById('modelContextValue');
         this.nextTurnTokensEl = document.getElementById('nextTurnTokens');
@@ -240,6 +242,7 @@ class OllamaAssistant {
         });
 
         if (this.sendMessageBtn) this.sendMessageBtn.addEventListener('click', () => this.sendMessage());
+        if (this.stopMessageBtn) this.stopMessageBtn.addEventListener('click', () => this.handleStopRequested());
         if (this.messageInput) this.messageInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -274,6 +277,40 @@ class OllamaAssistant {
         });
         // 使用捕获阶段监听，保证即使面板内部阻止了冒泡也能正确判断点击位置并关闭面板
         document.addEventListener('click', (e) => this.handleGlobalClickForMenus(e), true);
+    }
+
+    // 被调用以显示或隐藏停止按钮
+    setStopButtonVisible(visible) {
+        try {
+            if (!this.stopMessageBtn) return;
+            this.stopMessageBtn.style.display = visible ? '' : 'none';
+            this.stopMessageBtn.disabled = !visible;
+            // 当显示停止按钮时，隐藏发送按钮；当隐藏停止按钮时，恢复发送按钮显示
+            try {
+                if (this.sendMessageBtn) this.sendMessageBtn.style.display = visible ? 'none' : '';
+                if (this.sendMessageBtn) this.sendMessageBtn.disabled = visible; // 禁用发送按钮在停止期间
+            } catch (e) { /* ignore */ }
+        } catch (e) { /* ignore */ }
+    }
+
+    // 用户点击停止按钮的处理
+    async handleStopRequested() {
+        try {
+            if (!this._currentRequestId) return;
+            const reqId = this._currentRequestId;
+            // 发送中止请求到 background
+            await this.sendMessageToBackground('abortChat', { requestId: reqId });
+            // 立即清理 UI：移除占位并隐藏停止按钮
+            if (this.currentMessageId) {
+                // 直接移除未完成的助手占位，不显示任何取消文案
+                this.removeMessage(this.currentMessageId);
+                this.currentMessageId = null;
+            }
+            this._currentRequestId = null;
+            this.setStopButtonVisible(false);
+        } catch (e) {
+            console.warn('handleStopRequested failed:', e);
+        }
     }
 
     // 抓取并发送：注入 content_fetch.js 并将抓取文本保存为 user 消息并触发 sendChat
@@ -376,11 +413,17 @@ class OllamaAssistant {
                 // 构建发送给后台的 messages（沿用已有截断/摘要策略）并发送
                 const messagesForChat = this.buildMessagesForChat((await this.loadSession(this.activeSessionId)).messages);
                 console.debug('handleFetchAndSend -> sending sendChat with messages length', messagesForChat.length);
+                // 生成 requestId 并保存，显示停止按钮
+                const requestId = 'req_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+                this._currentRequestId = requestId;
+                this.setStopButtonVisible(true);
+
                 const bgResp = await this.sendMessageToBackground('sendChat', {
                     url: this.settings.ollamaUrl,
                     model: this.currentModel,
                     messages: messagesForChat,
-                    stream: this.settings.enableStreaming
+                    stream: this.settings.enableStreaming,
+                    requestId: requestId
                 });
                 console.debug('handleFetchAndSend -> background response', bgResp);
 
@@ -611,11 +654,18 @@ class OllamaAssistant {
             // 在发送请求前刷新一次 token 统计（更准确地反映下一回合）
             await this.refreshTokenStats();
 
+            // 生成 requestId 并保存
+            const requestId = 'req_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+            this._currentRequestId = requestId;
+            // 在 UI 中显示停止按钮
+            this.setStopButtonVisible(true);
+
             const response = await this.sendMessageToBackground('sendChat', {
                 url: this.settings.ollamaUrl,
                 model: this.currentModel,
                 messages: messagesForChat,
                 stream: this.settings.enableStreaming
+                , requestId: requestId
             });
             if (!response || !response.success) {
                 throw new Error((response && response.message) ? response.message : '后台无响应');
@@ -627,6 +677,8 @@ class OllamaAssistant {
             this.removeMessage(this.currentMessageId);
             this.addMessage('assistant', `错误: ${error.message}`);
             this.currentMessageId = null;
+            this._currentRequestId = null;
+            this.setStopButtonVisible(false);
         }
     }
 
@@ -680,6 +732,9 @@ class OllamaAssistant {
                 }
             }
             this.currentMessageId = null;
+            // 请求完成后隐藏停止按钮并清理 requestId
+            this._currentRequestId = null;
+            this.setStopButtonVisible(false);
         }
     }
 
@@ -723,6 +778,8 @@ class OllamaAssistant {
             this.removeMessage(this.currentMessageId);
             this.addMessage('assistant', `流式响应错误: ${request.error}`);
             this.currentMessageId = null;
+            this._currentRequestId = null;
+            this.setStopButtonVisible(false);
         }
     }
 

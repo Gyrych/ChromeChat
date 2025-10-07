@@ -72,3 +72,5 @@ curl -v -H "Origin: chrome-extension://<YOUR_EXTENSION_ID>" http://localhost:114
 
 - 2025-10-06: 新增 PRD 与实现计划：侧边栏自适应宽度与对话窗格右侧工具栏（将 `popup.css` 固定宽度替换为响应式，新增 `.chat-wrapper` 与 `.chat-toolbar`，并把“网页总结”按钮移到右侧工具栏）。
 
+- 2025-10-07: 新增“停止生成”按钮，可以在模型返回过程中中断请求，取消操作会移除未完成的回复占位而不显示额外提示。
+

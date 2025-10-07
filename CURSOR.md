@@ -133,3 +133,11 @@
   - 更改文件：`manifest.json`（添加 `scripting` 与 `activeTab` 权限）、`popup.html`（新增 `fetchAndSendBtn`）、`popup.js`（添加注入并保存逻辑）、新增 `content_fetch.js`（抓取/清洗页面文本）。
   - 目的：允许用户在弹窗中一键抓取当前页面正文并将其作为 `user` 消息保存与发送，沿用后台摘要与分段处理逻辑。
   - 状态：已实现前端注入与抓取脚本，后台分段/摘要逻辑将沿用现有 `prepareMessagesWithSummary`。
+
+- 2025-10-07: 新增“停止生成”按钮以支持中断正在进行的模型回复。
+  - 更改文件：`popup.html`, `sidebar.html`, `popup.js`, `background.js`, `doc/PRD_对话停止按钮_zh.md`
+  - 目的：在用户发送消息后将“发送”按钮替换为“停止”按钮，允许用户在模型返回过程中中断请求，避免等待或浪费资源。取消操作会直接移除未完成的助手占位而不显示额外提示。
+  - 主要实现要点：
+    - 前端：在发送时生成 `requestId` 并隐藏 `sendMessage`，显示 `stopMessageBtn`；收到流式完成或错误后恢复按钮状态。
+    - 后端：为每个 `requestId` 创建 `AbortController` 并在接收到 `abortChat` 消息时调用 `abort()` 中止对应请求；流式片段在中止前可能部分到达，popup 在中止时会移除未完成占位。
+    - 文档：新增 `doc/PRD_对话停止按钮_zh.md` 并在 `CURSOR.md`/`README_zh.md`/`README.md` 中记录变更。

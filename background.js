@@ -37,13 +37,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (summaryMeta) {
               try { await notifySummaryGenerated(summaryMeta); } catch (e) { console.warn('notifySummaryGenerated failed', e); }
             }
-            // 继续发送 chat 请求
-            await fetchChatAndNotify(request.url, request.model, preparedMessages, streamEnabled);
+            // 继续发送 chat 请求，传入 requestId 以便支持中止
+            await fetchChatAndNotify(request.url, request.model, preparedMessages, { stream: streamEnabled, requestId: request.requestId });
           } catch (err) {
             console.error('prepare/send chat failed, falling back to original messages', err);
             // 通知 popup 生成摘要失败（供 UI 显示），继续尝试发送原始 messages
             try { await safeSendToPopup({ action: 'summaryFailed', message: err && err.message ? err.message : String(err) }); } catch (e) { /* ignore */ }
-            await fetchChatAndNotify(request.url, request.model, request.messages, streamEnabled);
+            await fetchChatAndNotify(request.url, request.model, request.messages, { stream: streamEnabled, requestId: request.requestId });
           }
         })();
         return;
@@ -297,6 +297,17 @@ async function sendChatToOllama(url, model, messages, sendResponse) {
 }
 
 async function fetchChatAndNotify(url, model, messages, stream = true) {
+  // 支持两种调用方式：
+  // (url, model, messages, true|false) 或 (url, model, messages, {stream: true|false, requestId: '...'})
+  let requestId = null;
+  if (stream && typeof stream === 'object') {
+    const opts = stream || {};
+    requestId = opts.requestId || null;
+    stream = Boolean(opts.stream);
+  }
+
+  // activeRequests 映射：requestId -> AbortController
+  if (!globalThis._ollamaActiveRequests) globalThis._ollamaActiveRequests = {};
   let fullResponse = '';
   let isFirstChunk = true;
 
@@ -323,10 +334,17 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
       console.log('fetchChatAndNotify -> sanitizedMessages applied', { before: (messages||[]).length, after: sanitizedMessages.length });
     }
 
+    // 如果提供了 requestId，则为该请求创建 AbortController 并传入 signal
+    let controller = null;
+    if (requestId) {
+      controller = new AbortController();
+      try { globalThis._ollamaActiveRequests[requestId] = controller; } catch (e) { /* ignore */ }
+    }
     const response = await fetch(`${normalizeUrl(url)}/api/chat`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ model, messages: sanitizedMessages, stream })
+      body: JSON.stringify({ model, messages: sanitizedMessages, stream }),
+      signal: controller ? controller.signal : undefined
     });
 
     if (!response.ok) {
@@ -471,12 +489,43 @@ async function fetchChatAndNotify(url, model, messages, stream = true) {
 
   } catch (err) {
     console.error('fetchChatAndNotify error:', err);
+    // 如果是被中止的错误，发送特殊 error 到 popup
+    if (err && err.name === 'AbortError') {
+      await safeSendErrorToPopup({ action: 'streamError', error: '请求已被用户取消（Abort）' });
+      // 清理 activeRequests
+      try { if (requestId && globalThis._ollamaActiveRequests && globalThis._ollamaActiveRequests[requestId]) delete globalThis._ollamaActiveRequests[requestId]; } catch (e) { /* ignore */ }
+      return;
+    }
     await safeSendErrorToPopup({
       action: 'streamError',
       error: err && err.message ? err.message : String(err)
     });
+    try { if (requestId && globalThis._ollamaActiveRequests && globalThis._ollamaActiveRequests[requestId]) delete globalThis._ollamaActiveRequests[requestId]; } catch (e) { /* ignore */ }
   }
 }
+
+// 处理来自 popup 的中止请求
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (!request || !request.action) return;
+  if (request.action === 'abortChat') {
+    const reqId = request.requestId;
+    try {
+      if (reqId && globalThis._ollamaActiveRequests && globalThis._ollamaActiveRequests[reqId]) {
+        try { globalThis._ollamaActiveRequests[reqId].abort(); } catch (e) { /* ignore */ }
+        delete globalThis._ollamaActiveRequests[reqId];
+        try { sendResponse({ success: true, message: 'abort sent' }); } catch (e) { /* ignore */ }
+        return true;
+      } else {
+        try { sendResponse({ success: false, message: 'requestId not found or already finished' }); } catch (e) { /* ignore */ }
+        return true;
+      }
+    } catch (e) {
+      console.warn('abortChat handler failed', e);
+      try { sendResponse({ success: false, message: String(e) }); } catch (er) { /* ignore */ }
+      return true;
+    }
+  }
+});
 
 // 将摘要元数据通过 safeSendToPopup 发送到 popup（字段名与 popup 期望一致）
 async function notifySummaryGenerated(meta) {
