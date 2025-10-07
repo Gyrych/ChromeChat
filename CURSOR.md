@@ -143,3 +143,15 @@
   - 文档：新增 `doc/PRD_对话停止按钮_zh.md` 并在 `CURSOR.md`/`README_zh.md`/`README.md` 中记录变更。
 
 - 2025-10-07 20:00:00: 统一产品名称为 `ChromeChat`，修改文件：`manifest.json`, `popup.html`, `sidebar.html`, `popup.js` (类名), `README.md`, `README_zh.md`, `CURSOR.md`, `doc/PRD_会话管理与上下文_zh.md`。
+
+- 2025-10-07 21:10:00: 在页面右侧添加可点击把手以打开/关闭侧边栏
+  - 更改文件：`content_sidebar_inject.js`, `manifest.json`, `CURSOR.md`
+  - 目的：在任意网页右侧显示一个小把手图标（使用 `icons/icon48.png`），用户点击可快速打开或关闭侧边栏，提升交互发现性。
+  - 主要实现要点：
+    - 在 `content_sidebar_inject.js` 中新增 `createSidebarHandle()`，创建固定在页面右侧中间的把手按钮，点击时调用现有的 `createSidebar()`/`removeSidebar()` 切换侧边栏。
+    - 将 `icons/icon48.png` 加入 `manifest.json` 的 `web_accessible_resources`，以允许把手通过 `chrome.runtime.getURL` 加载图标。
+    - 把手样式在注入脚本中内联设置，确保在大多数网页上不会被页面 CSS 异常覆盖。
+  - 风险与说明：
+    - 个别网站可能存在严格的 CSP 或者对 fixed 元素的样式会被覆盖，若把手未显示可尝试在扩展侧调整样式或提供可选的小脚本对抗特定站点样式。
+    - 把手注入不会修改页面原始 DOM 结构（仅添加顶层固定元素），移除侧边栏时不会移除把手。
+  - 状态：已实现注入逻辑并更新 `manifest.json`。

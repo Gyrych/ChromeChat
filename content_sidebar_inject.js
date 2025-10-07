@@ -7,6 +7,7 @@
     const SIDEBAR_IFRAME_ID = 'ollama-assistant-sidebar-root';
     const SIDEBAR_CONTAINER_ID = 'ollama-assistant-sidebar-container';
     const STORAGE_KEY = 'ollama_sidebar_size';
+    const HANDLE_POS_KEY = 'ollama_sidebar_handle_pos';
 
     // 读取/保存上次尺寸
     function readSize() {
@@ -240,6 +241,162 @@
         } catch (e) { console.warn('restorePagePush failed', e); }
     }
 
+    // 右侧把手：半露胶囊样式，hover 滑出并支持键盘操作
+    function createSidebarHandle() {
+        try {
+            if (document.getElementById('ollama-sidebar-handle')) return;
+            const handle = document.createElement('div');
+            handle.id = 'ollama-sidebar-handle';
+            // 半露胶囊样式：默认一半隐藏在页面右侧，hover/聚焦时滑出
+            handle.style.position = 'fixed';
+            // 默认向右偏移一半宽度，使其半露在页面边缘
+            handle.style.right = '-24px';
+            // 优先恢复之前保存的位置（百分比 vh），否则默认居中
+            const savedHandlePos = (function(){ try { const v = localStorage.getItem(HANDLE_POS_KEY); return v !== null ? parseFloat(v) : null; } catch(e) { return null; } })();
+            if (savedHandlePos !== null && !Number.isNaN(savedHandlePos)) {
+                handle.style.top = savedHandlePos + 'vh';
+            } else {
+                handle.style.top = '50%';
+            }
+            handle.style.transform = 'translateY(-50%)';
+            // 胶囊尺寸（高保持圆形）——适配 32px 图标
+            handle.style.width = '48px';
+            handle.style.height = '48px';
+            handle.style.display = 'flex';
+            handle.style.alignItems = 'center';
+            handle.style.justifyContent = 'flex-start';
+            handle.style.paddingLeft = '6px';
+            handle.style.background = 'white';
+            handle.style.border = '1px solid rgba(0,0,0,0.12)';
+            handle.style.borderRadius = '24px 0 0 24px';
+            handle.style.boxShadow = '0 6px 18px rgba(0,0,0,0.18)';
+            handle.style.cursor = 'pointer';
+            handle.style.zIndex = '2147483647';
+            handle.style.transition = 'right 180ms cubic-bezier(.2,.8,.2,1), box-shadow 180ms ease, transform 180ms ease, opacity 180ms ease';
+            handle.style.opacity = '0.98';
+
+            const img = document.createElement('img');
+            img.src = chrome.runtime.getURL('icons/icon32.png');
+            img.style.width = '32px';
+            img.style.height = '32px';
+            img.style.display = 'block';
+            img.style.opacity = '1';
+            img.style.marginRight = '4px';
+            img.alt = 'ChromeChat';
+            handle.appendChild(img);
+
+            // 标签：默认隐藏，hover/展开时显示文本
+            const label = document.createElement('span');
+            label.textContent = 'ChromeChat';
+            label.style.fontFamily = 'sans-serif';
+            label.style.fontSize = '14px';
+            label.style.color = '#111';
+            label.style.marginLeft = '6px';
+            label.style.opacity = '0';
+            label.style.maxWidth = '0px';
+            label.style.whiteSpace = 'nowrap';
+            label.style.overflow = 'hidden';
+            label.style.transition = 'opacity 160ms ease, max-width 160ms ease';
+            handle.appendChild(label);
+
+            handle.title = '打开/关闭 ChromeChat 侧边栏';
+            // 鼠标进入时滑出，离开时收回
+            // 鼠标进入时滑出，离开时收回（若未在拖拽中）
+            let isHandleDragging = false;
+            handle.addEventListener('pointerenter', (ev) => {
+                if (isHandleDragging) return;
+                try {
+                    handle.style.right = '8px';
+                    handle.style.boxShadow = '0 8px 28px rgba(0,0,0,0.24)';
+                    // 显示标签
+                    label.style.maxWidth = '160px';
+                    label.style.opacity = '1';
+                } catch (e) {}
+            });
+            handle.addEventListener('pointerleave', (ev) => {
+                if (isHandleDragging) return;
+                try {
+                    handle.style.right = '-24px';
+                    handle.style.boxShadow = '0 6px 18px rgba(0,0,0,0.18)';
+                    // 隐藏标签
+                    label.style.opacity = '0';
+                    label.style.maxWidth = '0px';
+                } catch (e) {}
+            });
+            // 支持键盘操作（Enter/Space）
+            handle.tabIndex = 0;
+            handle.addEventListener('keydown', (ev) => {
+                if (ev.key === 'Enter' || ev.key === ' ') {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const present = !!document.getElementById(SIDEBAR_CONTAINER_ID);
+                    if (present) removeSidebar(); else createSidebar();
+                }
+            });
+
+            // 拖拽逻辑：上下拖动以改变位置并保存为 vh 百分比
+            let handleDragActive = false;
+            let handleDragStartY = 0;
+            let handleDragStartCenter = 0;
+            function onHandlePointerMove(ev) {
+                if (!handleDragActive) return;
+                ev.preventDefault();
+                const dy = ev.clientY - handleDragStartY;
+                let newCenter = handleDragStartCenter + dy;
+                const half = handle.offsetHeight / 2;
+                const minCenter = 8 + half;
+                const maxCenter = Math.max(half + 8, window.innerHeight - 8 - half);
+                newCenter = Math.max(minCenter, Math.min(maxCenter, newCenter));
+                // 以 px 设置 center top，保留 translateY(-50%) 以居中对齐
+                handle.style.top = newCenter + 'px';
+                // 持久化为视口高度百分比（vh），便于不同分辨率恢复
+                try { localStorage.setItem(HANDLE_POS_KEY, String(Math.round((newCenter / window.innerHeight) * 100))); } catch (e) {}
+                isHandleDragging = true;
+            }
+            function onHandlePointerUp(ev) {
+                if (!handleDragActive) return;
+                handleDragActive = false;
+                try { if (ev && ev.pointerId && handle.releasePointerCapture) handle.releasePointerCapture(ev.pointerId); } catch (e) {}
+                document.removeEventListener('pointermove', onHandlePointerMove);
+                document.removeEventListener('pointerup', onHandlePointerUp);
+                // 结束拖拽后短暂显示滑出效果然后收回
+                try {
+                    handle.style.right = '-24px';
+                    handle.style.boxShadow = '0 6px 18px rgba(0,0,0,0.18)';
+                    // 拖拽结束时隐藏标签
+                    label.style.opacity = '0';
+                    label.style.maxWidth = '0px';
+                } catch (e) {}
+                // 延迟清除标志，避免与 click 冲突
+                setTimeout(() => { isHandleDragging = false; }, 50);
+            }
+            handle.addEventListener('pointerdown', (ev) => {
+                // 仅响应主键
+                if (ev.button !== 0) return;
+                try { handle.setPointerCapture && handle.setPointerCapture(ev.pointerId); } catch (e) {}
+                handleDragActive = true;
+                handleDragStartY = ev.clientY;
+                const rect = handle.getBoundingClientRect();
+                handleDragStartCenter = rect.top + rect.height / 2;
+                document.addEventListener('pointermove', onHandlePointerMove);
+                document.addEventListener('pointerup', onHandlePointerUp);
+            });
+
+            // 点击切换侧边栏（如果不是拖拽引发的点击）
+            handle.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (isHandleDragging) return; // 拖拽后不要触发点击
+                const present = !!document.getElementById(SIDEBAR_CONTAINER_ID);
+                if (present) removeSidebar(); else createSidebar();
+            });
+
+            // 避免在某些页面样式中被遮挡或截断，挂载到 documentElement
+            document.documentElement.appendChild(handle);
+        } catch (err) { console.warn('createSidebarHandle failed', err); }
+    }
+
+    // 尝试创建把手（如果注入脚本已运行，则立即创建）
+    try { createSidebarHandle(); } catch (e) { /* ignore */ }
 })();
 
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChromeChat",
-  "version": "0.0.22",
+  "version": "0.0.23",
   "description": "与本地Ollama大模型对话的Chrome插件",
   "permissions": [
     "storage",
@@ -32,7 +32,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["sidebar.html", "popup.css", "popup.js"],
+      "resources": ["sidebar.html", "popup.css", "popup.js", "icons/icon48.png", "icons/icon32.png"],
       "matches": ["<all_urls>"],
       "use_dynamic_url": false
     }
