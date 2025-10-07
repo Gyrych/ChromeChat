@@ -1,4 +1,4 @@
-# Ollama Chrome Assistant
+# ChromeChat
 
 Lightweight Chrome extension that provides a popup or sidebar UI to interact with local Ollama models. Designed for quick technical workflows, it supports multi-turn sessions, streaming and non-streaming responses, session persistence, and export/import of sessions.
 
@@ -71,4 +71,5 @@ curl -v -H "Origin: chrome-extension://<YOUR_EXTENSION_ID>" http://localhost:114
 - 2025-10-06: Added a light glassmorphism UI for popup and sidebar to modernize appearance and ensure consistent styling.
 
 - 2025-10-07: Added a "Stop generation" button to allow users to abort in-progress model responses; cancelled partial assistant outputs are removed without extra notices.
+
 

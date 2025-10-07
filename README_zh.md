@@ -1,4 +1,4 @@
-# Ollama Chrome Assistant
+# ChromeChat
 
 轻量级 Chrome 扩展，在浏览器弹窗或侧边栏中与本地 Ollama 模型快速交互，面向技术工作流设计。支持多轮会话、流式与非流式响应、会话持久化与导出/导入。
 

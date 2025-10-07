@@ -1,4 +1,4 @@
-// 处理与Ollama的通信
+// 处理与 Ollama 的通信（保持对外服务名不变，但本扩展产品名为 ChromeChat）
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // 使用异步闭包以确保我们能捕获异常并总是保持消息通道打开
   (async () => {

@@ -6,10 +6,10 @@
 
 一、项目简介
 
-- 名称：Ollama Chrome Assistant
+- 名称：ChromeChat
 - 类型：Chrome 扩展（Manifest V3）
 - 功能：在浏览器弹窗中选择本地模型并与本地 Ollama 服务对话，支持会话管理、流式与非流式响应、会话导出/导入与摘要功能。
- - 名称：Ollama Chrome Assistant
+- 名称：ChromeChat
  - 类型：Chrome 扩展（Manifest V3）
  - 功能：在浏览器弹窗或侧边栏中选择本地模型并与本地 Ollama 服务对话，支持会话管理、流式与非流式响应、会话导出/导入与摘要功能。
 
@@ -140,4 +140,6 @@
   - 主要实现要点：
     - 前端：在发送时生成 `requestId` 并隐藏 `sendMessage`，显示 `stopMessageBtn`；收到流式完成或错误后恢复按钮状态。
     - 后端：为每个 `requestId` 创建 `AbortController` 并在接收到 `abortChat` 消息时调用 `abort()` 中止对应请求；流式片段在中止前可能部分到达，popup 在中止时会移除未完成占位。
-    - 文档：新增 `doc/PRD_对话停止按钮_zh.md` 并在 `CURSOR.md`/`README_zh.md`/`README.md` 中记录变更。
+  - 文档：新增 `doc/PRD_对话停止按钮_zh.md` 并在 `CURSOR.md`/`README_zh.md`/`README.md` 中记录变更。
+
+- 2025-10-07 20:00:00: 统一产品名称为 `ChromeChat`，修改文件：`manifest.json`, `popup.html`, `sidebar.html`, `popup.js` (类名), `README.md`, `README_zh.md`, `CURSOR.md`, `doc/PRD_会话管理与上下文_zh.md`。

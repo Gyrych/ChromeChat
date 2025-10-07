@@ -1,4 +1,4 @@
-class OllamaAssistant {
+class ChromeChatAssistant {
     constructor() {
         this.settings = {
             ollamaUrl: 'http://localhost:11434',
@@ -220,6 +220,19 @@ class OllamaAssistant {
         await chrome.storage.local.set({
             ollamaSettings: this.settings
         });
+        // 同步内存中的默认模型，确保随后加载模型列表时能选中已保存值
+        try { this._storedDefaultModel = this.settings.defaultModel || ''; } catch (e) { /* ignore */ }
+        // 如果模型列表已加载，立即尝试选中并触发 change 以刷新 UI 状态
+        try {
+            if (this.modelSelect && this._storedDefaultModel) {
+                const foundOption = Array.from(this.modelSelect.options).find(o => o.value === this._storedDefaultModel);
+                if (foundOption) {
+                    this.modelSelect.value = this._storedDefaultModel;
+                    const ev = new Event('change');
+                    this.modelSelect.dispatchEvent(ev);
+                }
+            }
+        } catch (e) { /* ignore */ }
         this.hideSettings();
         this.testConnection();
     }
@@ -449,6 +462,15 @@ class OllamaAssistant {
         const panel = this.settingsPanel;
         const isHidden = panel.classList.contains('hidden');
         if (isHidden) {
+            // 将面板移动到 document.body 以避免被父级毛玻璃或 overflow 影响（portal）
+            try {
+                if (panel.parentElement !== document.body) {
+                    panel._origParent = panel.parentElement;
+                    panel._origNextSibling = panel.nextSibling;
+                    document.body.appendChild(panel);
+                }
+            } catch (e) { /* ignore */ }
+
             panel.classList.remove('hidden');
             panel.style.display = 'block';
             panel.style.zIndex = '9999';
@@ -461,6 +483,16 @@ class OllamaAssistant {
             panel.style.zIndex = '';
             panel.setAttribute('aria-hidden', 'true');
             try { this.settingsBtn.setAttribute('aria-expanded', 'false'); } catch (e) { /* ignore */ }
+            // 如之前移动过，尝试还原到原始父节点
+            try {
+                if (panel._origParent) {
+                    const parent = panel._origParent;
+                    const next = panel._origNextSibling;
+                    if (next) parent.insertBefore(panel, next); else parent.appendChild(panel);
+                    panel._origParent = null;
+                    panel._origNextSibling = null;
+                }
+            } catch (e) { /* ignore */ }
         }
     }
 
@@ -471,6 +503,17 @@ class OllamaAssistant {
         this.settingsPanel.style.zIndex = '';
         try { this.settingsPanel.setAttribute('aria-hidden', 'true'); } catch (e) { /* ignore */ }
         try { this.settingsBtn.setAttribute('aria-expanded', 'false'); } catch (e) { /* ignore */ }
+        // 如之前移动过，尝试还原到原始父节点
+        try {
+            const panel = this.settingsPanel;
+            if (panel._origParent) {
+                const parent = panel._origParent;
+                const next = panel._origNextSibling;
+                if (next) parent.insertBefore(panel, next); else parent.appendChild(panel);
+                panel._origParent = null;
+                panel._origNextSibling = null;
+            }
+        } catch (e) { /* ignore */ }
     }
 
     // 计算并调整任意浮层面板（如 settingsPanel）的显示位置，使其靠近对应按钮并避免溢出
@@ -1570,5 +1613,5 @@ class OllamaAssistant {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    new OllamaAssistant();
+    new ChromeChatAssistant();
 });

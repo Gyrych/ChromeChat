@@ -1,4 +1,4 @@
-# PRD：会话管理与上下文（Ollama Chrome Assistant）
+# PRD：会话管理与上下文（ChromeChat）
 
 ## 1. 背景与目标
 本扩展当前支持在弹窗中选择模型并与本地 Ollama 进行单轮对话。用户希望引入“会话”概念：

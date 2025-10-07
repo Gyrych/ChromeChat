@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Ollama Chrome Assistant",
-  "version": "1.0.0",
+  "name": "ChromeChat",
+  "version": "0.0.21",
   "description": "与本地Ollama大模型对话的Chrome插件",
   "permissions": [
     "storage",
@@ -10,7 +10,7 @@
     "scripting"
   ],
   "action": {
-    "default_title": "Ollama助手",
+    "default_title": "ChromeChat",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -19,7 +19,7 @@
   },
   "sidebar_action": {
     "default_panel": "sidebar.html",
-    "default_title": "Ollama助手（侧边栏）"
+    "default_title": "ChromeChat（侧边栏）"
   },
   "icons": {
     "16": "icons/icon16.png",
