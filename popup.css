@@ -653,6 +653,11 @@ input[type="range"]::-webkit-slider-thumb {
 .estimate #estimateLabel { color: #666; }
 .estimate strong { color: #1976d2; }
 
+/* 会话已消耗 tokens 显示样式，与 estimate 保持一致 */
+.consumed { font-size: 13px; color: #333; display: flex; gap: 8px; align-items: center; }
+.consumed #consumedLabel { color: #666; }
+.consumed strong { color: #d32f2f; }
+
 .input-container {
     display: flex;
     flex-direction: column;

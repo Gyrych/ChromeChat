@@ -176,8 +176,9 @@ class ChromeChatAssistant {
         this.fetchAndSendBtn = document.getElementById('fetchAndSendBtn');
         // 停止按钮（用于中断正在进行的生成）
         this.stopMessageBtn = document.getElementById('stopMessageBtn');
-        // 底部显示元素：模型上下文与预计 tokens
+        // 底部显示元素：模型上下文、会话已消耗与预计 tokens
         this.modelContextValue = document.getElementById('modelContextValue');
+        this.sessionConsumedTokensEl = document.getElementById('sessionConsumedTokens');
         this.nextTurnTokensEl = document.getElementById('nextTurnTokens');
     }
 
@@ -650,6 +651,11 @@ class ChromeChatAssistant {
     updateModelContextDisplay() {
         const map = {
             'deepseek-r1:1.5b': '128k',
+            'deepseek-v3.1:671b-cloud': '160k',
+            'gpt-oss:120b-cloud': '128k',
+            'gpt-oss:20b-cloud': '128k',
+            'qwen3-coder:480b-cloud': '256k',
+            'kimi-k2:1t-cloud': '256k',
             'gemma3:270m': '32k',
             'gemma3:1b': '32k',
             'gemma3:4b': '128k',
@@ -685,10 +691,25 @@ class ChromeChatAssistant {
             const input = this.messageInput ? this.messageInput.value || '' : '';
             const nextTurn = total + this.estimateTokensFromText(input);
 
-            // 更新预计 tokens
-            if (this.nextTurnTokensEl) this.nextTurnTokensEl.textContent = String(nextTurn);
+            // 更新消耗 tokens（以 k 为单位显示，保留一位小数）
+            if (this.nextTurnTokensEl) this.nextTurnTokensEl.textContent = `${(nextTurn/1024).toFixed(1)}k`;
         } catch (e) {
             console.warn('刷新 token 统计失败:', e);
+        }
+    }
+
+    // 刷新并显示当前会话累计已消耗 tokens（从 session.tokenUsage 读取）
+    async refreshSessionConsumedTokens() {
+        try {
+            let consumed = 0;
+            if (this.activeSessionId) {
+                const session = await this.loadSession(this.activeSessionId);
+                if (session && typeof session.tokenUsage === 'number') consumed = session.tokenUsage;
+            }
+            // 以 k 为单位显示
+            if (this.sessionConsumedTokensEl) this.sessionConsumedTokensEl.textContent = `${((consumed||0)/1024).toFixed(1)}k`;
+        } catch (e) {
+            console.warn('刷新会话已消耗 tokens 失败:', e);
         }
     }
 
@@ -814,10 +835,21 @@ class ChromeChatAssistant {
                     await this.saveSession(await this.loadSession(this.activeSessionId));
                     await this.refreshSessionTimestamps();
 
-                    // 若 background 发送了精确 token 信息，更新底部显示（优先使用精确值）
+                    // 若 background 发送了精确 token 信息，更新底部显示（优先使用精确值）并累加到会话的 tokenUsage
                     if (typeof request.totalTokens === 'number' || typeof request.promptTokens === 'number' || typeof request.genTokens === 'number') {
                         const total = typeof request.totalTokens === 'number' ? request.totalTokens : ((request.promptTokens || 0) + (request.genTokens || 0));
-                        if (this.nextTurnTokensEl) this.nextTurnTokensEl.textContent = String(total || 0);
+                        if (this.nextTurnTokensEl) this.nextTurnTokensEl.textContent = `${(((total||0)/1024)).toFixed(1)}k`;
+                        try {
+                            // 累加到当前会话并持久化
+                            if (this.activeSessionId) {
+                                const session = await this.loadSession(this.activeSessionId);
+                                if (session) {
+                                    session.tokenUsage = (session.tokenUsage || 0) + (total || 0);
+                                    await this.saveSession(session);
+                                    await this.refreshSessionConsumedTokens();
+                                }
+                            }
+                        } catch (e) { console.warn('累加会话 tokenUsage 失败:', e); }
                     } else {
                         // fallback：使用本地估算
                         await this.refreshTokenStats();
@@ -1095,7 +1127,7 @@ class ChromeChatAssistant {
     async createSession({ model, name }) {
         const id = this.uuid();
         const now = Date.now();
-        const session = { id, name: name || this.defaultSessionName(model), model: model || '', createdAt: now, updatedAt: now, messages: [] };
+        const session = { id, name: name || this.defaultSessionName(model), model: model || '', createdAt: now, updatedAt: now, messages: [], tokenUsage: 0 };
         // 为确保一致性，先获得索引锁与会话锁，再执行保存与索引更新
         const releaseIndex = await this._acquireSessionLock();
         const releaseSession = await this._acquireSessionLock(id);
@@ -1241,6 +1273,8 @@ class ChromeChatAssistant {
                 if (el) el.innerHTML = this.renderMessageHtml(m.content);
             } catch (e) { /* ignore */ }
         }
+        // 渲染完会话消息后，更新会话已消耗 tokens 显示
+        try { await this.refreshSessionConsumedTokens(); } catch (e) { console.warn('refreshSessionConsumedTokens failed', e); }
     }
 
     // 展示原始范围的消息（用于展开摘要）

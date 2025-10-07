@@ -631,6 +631,11 @@ async function prepareMessagesWithSummary(url, model, originalMessages) {
   // 读取模型最大上下文（简易内置映射，若未知返回 null）
   const modelMaxContextMap = {
     'deepseek-r1:1.5b': 128000,
+    'deepseek-v3.1:671b-cloud': 160000,
+    'gpt-oss:120b-cloud': 128000,
+    'gpt-oss:20b-cloud': 128000,
+    'qwen3-coder:480b-cloud': 256000,
+    'kimi-k2:1t-cloud': 256000,
     'gemma3:270m': 32000,
     'gemma3:1b': 32000,
     'gemma3:4b': 128000,

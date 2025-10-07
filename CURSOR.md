@@ -32,6 +32,14 @@
 四、关键实现细节
 
 - 会话模型：Session 对象包含 `id, name, model, createdAt, updatedAt, messages[]`，索引保存在 `ollama.sessionIndex`（sessions 列表 + lastActiveSessionId）。
+ - 会话模型：Session 对象包含 `id, name, model, createdAt, updatedAt, messages[]`，索引保存在 `ollama.sessionIndex`（sessions 列表 + lastActiveSessionId）。
+   - 新增字段：`tokenUsage`（整数）用于记录会话累计已消耗的 tokens；在模型返回并包含精确 token 信息时，前端会将该值累加并持久化到会话对象中。
+  - 模型上下文映射更新：新增或更新以下模型的最大上下文值供 UI 显示与摘要触发逻辑使用：
+    - `deepseek-v3.1:671b-cloud`: 160000（160k）
+    - `gpt-oss:120b-cloud`: 128000（128k）
+    - `gpt-oss:20b-cloud`: 128000（128k）
+    - `qwen3-coder:480b-cloud`: 256000（256k）
+    - `kimi-k2:1t-cloud`: 256000（256k）
 - 并发控制：在 `popup.js` 中引入内存级写锁 `_acquireSessionLock`，以序列化对单个 session 与索引的写操作，防止并发写入导致的数据竞争。
 - 流式解析：`background.js` 使用 `response.body.getReader()` 读取流，按行拆分 NDJSON，兼容多种格式（Ollama `/api/chat`、OpenAI 风格 delta），增量发送 `streamUpdate` 消息回 popup。
 - 摘要策略：在发送前评估 prompt tokens（尝试通过 `max_tokens:0` 请求获取服务端返回的 prompt_eval_count，如不可用则进行字符数/4 的估算），当接近模型上下文阈值时触发 `generateSummary` 并将摘要插入为 system 消息，保留最近若干条消息以维持短期上下文。
