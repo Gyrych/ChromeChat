@@ -1,76 +1,68 @@
 # ChromeChat
 
-轻量级 Chrome 扩展，在浏览器弹窗或侧边栏中与本地 Ollama 模型快速交互，面向技术工作流设计。支持多轮会话、流式与非流式响应、会话持久化与导出/导入。
+**版本：** 0.1.0
 
-## 功能亮点
+**描述：**
+ChromeChat 是一个 Chrome 扩展（Manifest V3），允许用户直接在浏览器的弹窗或侧边栏与本地或云端的 Ollama 模型进行交互。
 
-- 模型选择与快速发送 prompt
-- 流式响应（可配置打字机效果）与非流式回退
-- 会话管理：新建/切换/重命名/删除/导出
-- 自动持久化：在用户发送消息后及模型返回完整回答后保存会话
-- 使用 `/api/chat` 支持多轮上下文
+**功能：**
+- **互动聊天：** 通过弹窗或侧边栏与 Ollama 模型进行对话。
+- **流式与非流式响应：** 支持流式和非流式模式，并具有打字机效果。
+- **会话管理：** 创建、读取、更新、删除、导出和导入聊天会话。
+- **自动摘要与上下文截断：** 自动总结对话内容并管理上下文长度。
+- **页面内容集成：** 获取当前页面的主要内容并作为用户消息发送。
+- **停止生成：** 允许中断正在进行的响应。
 
-## 架构概览
+**目录结构：**
+- `popup.html` / `popup.css` / `popup.js`：处理弹窗 UI 和前端逻辑，包括会话管理、输入/输出、模型选择和设置。
+- `sidebar.html` / `content_sidebar_inject.js`：管理侧边栏 UI 和注入逻辑。
+- `background.js`：作为 Service Worker，处理与 Ollama 的网络交互、流式解析、摘要生成和消息桥接。
+- `content_fetch.js`：注入到网页中以提取主要内容供用户消息使用。
+- `manifest.json`：定义扩展的元数据和权限。
+- `icons/`：包含扩展图标。
+- `styles/`：包含共享的 CSS 样式。
+- `locales/`：提供多语言的本地化文件。
 
-- 弹窗 / 侧边栏（UI）：`popup.html` / `sidebar.html`、`popup.css`、`popup.js` — 负责渲染会话、用户交互与本地存储（`chrome.storage.local`）。侧边栏在较宽视口下会提供更高的消息展示区域与固定输入区。
-- 后台 worker：`background.js` — 与 Ollama 网络交互（`/api/tags`、`/api/chat`、`/api/generate`）、流式解析、摘要生成，并将更新发送给 popup。
-- 存储：会话以 `ollama.session.<id>` 保存，索引保存在 `ollama.sessionIndex`。
+**安装：**
+1. 克隆此仓库。
+2. 打开 Chrome，导航至 `chrome://extensions/`。
+3. 启用“开发者模式”（右上角的开关）。
+4. 点击“加载已解压的扩展程序”，选择克隆的仓库文件夹。
 
-## 运行要求
+**使用方法：**
+- 点击工具栏中的 ChromeChat 图标以打开弹窗。
+- 使用侧边栏把手打开/关闭侧边栏。
+- 配置设置以连接到本地或云端的 Ollama 模型。
+- 开始新会话或继续现有会话，与模型进行聊天。
 
-- Chrome（Manifest V3）
-- 本地 Ollama 服务（默认 `http://localhost:11434`）
+**配置：**
+- **本地 Ollama 模型：**
+  - 确保 Ollama 在本地运行并可访问。
+  - 在扩展设置中设置 API 端点。
+- **云端 Ollama 模型：**
+  - 从 Ollama 云服务获取 API 密钥。
+  - 在扩展设置中输入 API 密钥。
 
-## 安装与配置
+**已知问题：**
+- **CORS 错误：** 确保 `OLLAMA_ORIGINS` 包含扩展的源，并重启 Ollama。
+- **响应体不可用：** 切换到非流式模式以获取完整的 JSON 响应。
+- **注入失败：** 某些 Chrome 内部页面或 Web Store 可能阻止脚本注入；扩展会检查可注入的 URL。
 
-1. 配置 Ollama 允许扩展访问（Windows PowerShell，管理员）：
+**安全注意事项：**
+- 在生产环境中避免将 `OLLAMA_ORIGINS` 设置为 `*`。
+- 安全地存储 Ollama API 密钥，并在不需要时移除。
+- 如果将 Ollama 暴露到局域网，请配置防火墙规则以限制访问。
 
-```powershell
-setx OLLAMA_HOST "0.0.0.0:11434" -m
-setx OLLAMA_ORIGINS "chrome-extension://<YOUR_EXTENSION_ID>" -m
-```
+**变更日志：**
+- **2025-10-03：** 修复消息持久化顺序；引入写锁。
+- **2025-10-05：** 支持 Ollama 云 API 密钥配置，并在请求中注入 Authorization。
+- **2025-10-06：** 引入浅色毛玻璃 UI。
+- **2025-10-07：** 增加“停止生成”功能；注入侧边栏把手以打开/关闭侧边栏。
 
-将 `<YOUR_EXTENSION_ID>` 替换为 `chrome://extensions/` 中的扩展 id（不要带尖括号）。修改环境变量后需重启 Ollama 进程或系统。
+**待办与建议改进：**
+- 集成 tokenizer 库以获得精确的 token 计数。
+- 改进流式兼容性：研究 MessageChannel 或本地代理以更可靠地传递大体量 NDJSON。
+- 提供可选的 Ollama 启动脚本/服务，以简化 Windows 启动时的环境变量配置。
 
-2. 加载扩展：
-
-- 打开 `chrome://extensions/` → 开启开发者模式 → Load unpacked → 选择本项目目录。
-
-3. 打开弹窗，选择模型并开始对话。首次选择模型时会自动创建会话。
-
-关于云端模型：若要使用 Ollama 的云端模型（`https://ollama.com`），请在设置面板中填写 `Ollama API Key`（将保存在 `chrome.storage.local`），并保存。扩展会在请求云端 API 时自动携带 `Authorization: Bearer <API_KEY>` 头。修改 `manifest.json` 后需在 `chrome://extensions` 手动重新加载扩展以应用新权限。
-
-## 使用说明
-
-- 会话只在两个时刻持久化：用户发送消息后、模型返回完整回答后，以减少频繁写入。
-- 可在会话菜单导出单个或全部会话为 JSON 文件。
-
-## 故障排查
-
-- 若 `GET /api/tags` 成功但 `POST /api/chat` 返回 403，通常是 `OLLAMA_ORIGINS` 未正确配置。可用以下命令排查：
-
-```bash
-curl -v -H "Origin: chrome-extension://<YOUR_EXTENSION_ID>" http://localhost:11434/api/tags
-```
-
-- 若流式解析失败（如 `Response body is not available`），请在设置中切换到非流式以获取完整 JSON 响应用于排查。
-
-## 安全注意
-
-- 生产环境不要将 `OLLAMA_ORIGINS` 设为 `*`，优先使用 `chrome-extension://<id>`。
-- 将 Ollama 暴露到局域网时，请在防火墙中限制访问权限。
-
-## 开发备注
-
-- background 负责将不同格式的响应统一为 `streamUpdate` 事件；popup 使用简单的字符/4 估算 token，可考虑集成 tokenizer 获取精确值。
-
-## 变更记录（高层）
-
-- 2025-10-05: 记录并修复 Ollama 白名单导致的 403 问题，更新文档。
-
- - 2025-10-06: 增加浅色毛玻璃界面（glassmorphism），统一弹窗与侧边栏视觉风格，提升现代感。
-
-- 2025-10-06: 新增 PRD 与实现计划：侧边栏自适应宽度与对话窗格右侧工具栏（将 `popup.css` 固定宽度替换为响应式，新增 `.chat-wrapper` 与 `.chat-toolbar`，并把“网页总结”按钮移到右侧工具栏）。
-
-- 2025-10-07: 新增“停止生成”按钮，可以在模型返回过程中中断请求，取消操作会移除未完成的回复占位而不显示额外提示。
+*本次草稿由 AI 助手于 2025-10-08 生成并在用户确认后写入项目的 `README_zh.md`。*
 

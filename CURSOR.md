@@ -1,165 +1,82 @@
-# 项目总览与架构文档
+# ChromeChat — 项目总览与架构文档
 
-本文档为项目的系统化说明、运行指南与变更记录（CURSOR 记忆体）。内容覆盖：项目目标、目录结构、核心实现概览、运行与调试步骤、安全与部署注意、设计决策、已知限制与历史变更。
-
-目的：为后续开发者（包含你本人）提供一份可以离线检索的、结构化的项目记忆，减少上下文切换成本并保证实现与 PRD/README 保持一致。
+本文档为项目的系统化说明、运行与调试指南与变更记录（CURSOR 记忆体）。用于记录项目目标、目录结构、核心实现概览、运行配置、设计决策、已知限制与历史变更，供开发者离线检索与快速上手。
 
 一、项目简介
-
 - 名称：ChromeChat
 - 类型：Chrome 扩展（Manifest V3）
-- 功能：在浏览器弹窗中选择本地模型并与本地 Ollama 服务对话，支持会话管理、流式与非流式响应、会话导出/导入与摘要功能。
-- 名称：ChromeChat
- - 类型：Chrome 扩展（Manifest V3）
- - 功能：在浏览器弹窗或侧边栏中选择本地模型并与本地 Ollama 服务对话，支持会话管理、流式与非流式响应、会话导出/导入与摘要功能。
+- 版本：0.1.0
+- 功能概览：
+  - 在弹窗或侧边栏与本地或云端 Ollama 模型对话。
+  - 支持流式（streaming）与非流式响应、打字机效果、会话管理（CRUD）、会话导出/导入、自动摘要与上下文截断。
+  - 支持抓取当前页面正文并作为 user 消息发送。
+  - 支持停止生成（中断进行中的请求）。
 
-二、目录与关键文件
-
-- `popup.html` / `popup.css` / `popup.js`：前端 UI 与交互逻辑（会话管理、输入输出、模型选择、token 估算、设置面板）。
-- `background.js`：Service Worker，负责与 Ollama 的所有网络交互（/api/tags、/api/chat、/api/generate）、流式解析、摘要生成触发、与 popup 的消息桥接与 pending 缓存。
+二、目录结构（简要）
+- `popup.html` / `popup.css` / `popup.js`：弹窗 UI 与前端交互逻辑（会话管理、输入/输出、模型选择、设置）。
+- `sidebar.html` / `content_sidebar_inject.js`：页面侧边栏与把手注入逻辑。
+- `background.js`：Service Worker，负责与 Ollama 的网络交互、流式解析、摘要生成与消息桥接。
+- `content_fetch.js`：注入脚本，抓取并清洗网页正文文本。
 - `manifest.json`：扩展清单（权限、host_permissions、service_worker）。
-- `doc/PRD_会话管理与上下文_zh.md`：会话管理 PRD 与设计决策。
-- `CURSOR.md`：本文件（项目记忆与变更记录）。
- - `doc/PRD_侧边栏自适应与右侧按钮_zh.md`：侧边栏自适应宽度与对话窗格右侧工具栏 PRD（本次新增）。
+- `doc/`：PRD 与产品设计文档（中文）。
+- `icons/`, `lib/`：资源与库文件。
+- 根目录：`README.md`、`README_zh.md`、`CURSOR.md`（本文件）。
 
 三、系统架构概览
+- 前端（Popup / Sidebar）
+  - 负责渲染会话、处理用户输入、展示消息、会话持久化（`chrome.storage.local`）与 UI 设置。
+  - 使用 `Chrome.scripting.executeScript` 注入 `content_fetch.js` 抓取页面内容。
+- 后台（Service Worker — `background.js`）
+  - 负责对 Ollama 的请求（`/api/tags`、`/api/chat`、`/api/generate`）、流式解析（ReadStream -> NDJSON/line delimited parsing）、摘要生成触发逻辑与与 popup 的消息桥接。
+  - 提供非流式回退逻辑（当流不可用时），并支持云端 API Key（`ollama.com`）的 Authorization 注入。
+- 存储
+  - 会话单元保存在 `chrome.storage.local`，键名以 `ollama.session.<id>` 存储，会话索引保存在 `ollama.sessionIndex`（包含 `sessions[]` 与 `lastActiveSessionId`）。
+  - 临时未持久化会话保存在内存 `_unsavedSessions`，避免大量空会话写入 storage。
 
-- 浏览器弹窗（popup）作为前端展示层，负责用户输入、会话渲染与本地持久化（`chrome.storage.local`）。
- - 浏览器弹窗（popup）或侧边栏（sidebar）作为前端展示层，负责用户输入、会话渲染与本地持久化（`chrome.storage.local`）。侧边栏在较宽视口下提供更长的会话展示高度与粘性输入区域。
-- `background.js` 作为网络层与控制层，处理与 Ollama 的交互、流式数据解析与中间态存储（当 popup 关闭时，pending 消息会写入 local storage）。
-- 数据持久化：采用 `chrome.storage.local` 存储 session 对象与索引；会话持久化策略为“在用户发送消息后”和“模型返回完整回答后”两处自动保存。
+四、关键数据模型
+- Session:
+  - { id, name, model, createdAt, updatedAt, messages[], summaries[], tokenUsage }
+  - message: { role: 'user'|'assistant'|'system', content, ts }
+- 索引（`ollama.sessionIndex`）:
+  - { sessions: [id], lastActiveSessionId }
 
-四、关键实现细节
+五、主要实现要点与设计决策
+- 会话持久化策略：仅在“用户发送消息后”和“模型返回完整回答后”进行覆盖式保存，减少写入频率并通过会话锁序列化写操作。
+- 并发写锁：前端实现内存级会话/索引写锁 `_acquireSessionLock(sessionId)`，串行化对单会话或索引的写入操作，避免竞态。
+- 流解析与回退：后台按行解析 stream（兼容 Ollama NDJSON 及 OpenAI delta），如 stream 不可读则使用非流式 JSON 回退。
+- 摘要触发：通过估算 prompt tokens（尝试使用服务端返回的 prompt_eval_count，否则用字符/4 估算），靠近模型上下文限制时触发自动摘要并以 system message 插入。
+- Token 统计：窗口端使用简单的基于空白分词的估算器（chars/space 或 chars/4）作为占位，后台可能返回精确 token 信息用于累加 `session.tokenUsage`。
+- 中断机制：每个请求生成 `requestId` 并由 background 管理对应的 `AbortController`，popup 可发送 `abortChat` 以中止在进行的请求并清理 UI 占位。
 
-- 会话模型：Session 对象包含 `id, name, model, createdAt, updatedAt, messages[]`，索引保存在 `ollama.sessionIndex`（sessions 列表 + lastActiveSessionId）。
- - 会话模型：Session 对象包含 `id, name, model, createdAt, updatedAt, messages[]`，索引保存在 `ollama.sessionIndex`（sessions 列表 + lastActiveSessionId）。
-   - 新增字段：`tokenUsage`（整数）用于记录会话累计已消耗的 tokens；在模型返回并包含精确 token 信息时，前端会将该值累加并持久化到会话对象中。
-  - 模型上下文映射更新：新增或更新以下模型的最大上下文值供 UI 显示与摘要触发逻辑使用：
-    - `deepseek-v3.1:671b-cloud`: 160000（160k）
-    - `gpt-oss:120b-cloud`: 128000（128k）
-    - `gpt-oss:20b-cloud`: 128000（128k）
-    - `qwen3-coder:480b-cloud`: 256000（256k）
-    - `kimi-k2:1t-cloud`: 256000（256k）
-- 并发控制：在 `popup.js` 中引入内存级写锁 `_acquireSessionLock`，以序列化对单个 session 与索引的写操作，防止并发写入导致的数据竞争。
-- 流式解析：`background.js` 使用 `response.body.getReader()` 读取流，按行拆分 NDJSON，兼容多种格式（Ollama `/api/chat`、OpenAI 风格 delta），增量发送 `streamUpdate` 消息回 popup。
-- 摘要策略：在发送前评估 prompt tokens（尝试通过 `max_tokens:0` 请求获取服务端返回的 prompt_eval_count，如不可用则进行字符数/4 的估算），当接近模型上下文阈值时触发 `generateSummary` 并将摘要插入为 system 消息，保留最近若干条消息以维持短期上下文。
+六、运行与配置（快速）
+- 推荐环境变量（Windows PowerShell，管理员）：
+  - setx OLLAMA_HOST "0.0.0.0:11434" -m
+  - setx OLLAMA_ORIGINS "chrome-extension://<YOUR_EXTENSION_ID>" -m
+- 默认 Ollama 地址：`http://localhost:11434`
+- manifest 已包含 `host_permissions`：`http://localhost:11434/*` 与 `https://ollama.com/*`
+- 加载扩展：`chrome://extensions/` -> Developer mode -> Load unpacked -> 选择项目目录。
 
-五、运行与配置（快速参考）
+七、常见问题与排查
+- 403 from POST /api/chat：通常因 `OLLAMA_ORIGINS` 未包含扩展 origin -> 检查并重启 Ollama。
+- Response body is not available：后端未提供可读流或 CORS/代理拦截 -> 切换到非流式模式获取完整 JSON。
+- 注入脚本失败：某些 Chrome 内置页面或 Web Store 页面禁止注入，代码中已做检测 `isInjectableUrl()`。
 
-- 推荐环境变量（Windows，管理员 PowerShell）：
-  - `OLLAMA_HOST=0.0.0.0:11434`
-  - `OLLAMA_ORIGINS=chrome-extension://<YOUR_EXTENSION_ID>`
-  注意：不要在值周围使用尖括号。修改后需重启 Ollama 进程或系统以生效。
+八、安全与注意事项
+- 不要在生产环境将 `OLLAMA_ORIGINS` 设为 `*`。
+- Ollama API Key 存储在 `chrome.storage.local`，慎用并在不必要时移除。
+- 若将 Ollama 暴露至 LAN，请配置防火墙规则限制访问。
 
-- manifest 中已包含 `host_permissions` 指向 `http://localhost:11434/*`，确保扩展可发起请求。
+九、历史变更（摘要）
+- 2025-10-03: 修复消息持久化顺序、引入写锁。
+- 2025-10-05: 支持 Ollama 云 API Key 配置并在请求中注入 Authorization。
+- 2025-10-06: 引入浅色毛玻璃 UI（glassmorphism）。
+- 2025-10-07: 增加“停止生成”中断功能；注入侧边栏把手以打开/关闭侧边栏。
+（详细变更请见项目根 CURSOR.md 的变更记录）
 
-六、调试要点与常见问题
+十、待办与建议改进
+- 集成 tokenizer 库以获得精确 token 计数。
+- 改进流式兼容性：研究 MessageChannel 或 local proxy 以更可靠地传递大体量 NDJSON。
+- 提供可选的 Ollama 启动脚本/服务以简化 Windows 启动时的环境变量配置。
 
-- 如果 `GET /api/tags` 成功但 `POST /api/chat` 返回 403，通常为 Ollama 白名单（`OLLAMA_ORIGINS`）问题。使用 `curl -v -H "Origin: chrome-extension://<id>"` 验证。
-- 若流式解析抛出 `Response body is not available`，说明服务端未提供可读流或被拦截，建议回退到非流式模式以获取完整 JSON 并打印响应体以诊断。
-- 在 popup 开发时若收不到流式更新，检查 background -> popup 的消息桥接（`chrome.runtime.sendMessage`）与 pending 缓存逻辑（`ollama.pendingStreamUpdates`）。
-
-七、安全与部署注意
-
-- 切勿长期在 `OLLAMA_ORIGINS` 使用 `*`，生产环境应仅允许具体扩展 origin。
-- 若需要通过局域网访问 Ollama，应同时在系统防火墙中针对端口 `11434` 做最小化放行策略。
-
-八、历史变更摘要（高亮）
-
-- 2025-09-30: 增加强调/debug 日志，改进 background 的错误处理；实现对 `/api/chat` 的支持并初步实现非流式回退逻辑。
-- 2025-10-02: 增加 PRD 并实现会话管理（CRUD、导出）、摘要触发与会话索引管理。
-- 2025-10-03: 重构会话 UI，完善流式解析、打字机效果与 token 显示。
-- 2025-10-05: 修复 Ollama 白名单导致的 403 问题，记录在本文件并同步到 README。
-
-- 2025-10-06: 添加浅色毛玻璃（glassmorphism）界面样式，统一弹窗与侧边栏视觉风格。
-  - 更改文件：`popup.css`, `popup.html`, `sidebar.html`, `doc/PRD_浅色毛玻璃界面_zh.md`, `README_zh.md`, `README.md`
-  - 目的：提升界面现代感，使用浅色半透明毛玻璃风格（中度模糊 blur(12px)），并提供对不支持 `backdrop-filter` 的环境的降级样式。
-  - 主要实现要点：
-    - 在 `popup.css` 中新增 `.glass-panel` 类，使用 `backdrop-filter: blur(12px)`（并包含 `-webkit-backdrop-filter`）及半透明白背景；同时使用 `@supports` 和 `@supports not` 提供兼容性降级。
-    - 在 `popup.html` 与 `sidebar.html` 中将顶层容器和关键子区域（`.header`, `.settings-panel`, `.chat-container`, `.input-area`）添加 `glass-panel` 类以启用样式复用。
-    - 在 README（中/英）与 `CURSOR.md` 中纪录本次界面更新。
- - 2025-10-06: 统一控件视觉风格（按钮、下拉、输入、滑条等），提升简约与高级感。
-  - 更改文件：`popup.css`
-  - 目的：统一按钮、下拉、输入框、滑条等控件的样式，保证在毛玻璃背景上具有良好对比与触感反馈，体现简约高级风格（圆角、更细腻的阴影、强调色点缀）。
-  - 主要实现要点：
-    - 按钮：统一为 8px 圆角、带轻微阴影、主按钮使用半不透明的品牌色（`rgba(25,118,210,0.95)`），次级按钮采用半透明白背景以适配毛玻璃。
-    - 表单控件：输入/选择/文本域使用统一圆角、半透明背景，并在 focus 时使用蓝色阴影和更明显边框以提升可见性。
-    - 滑条与下拉：自定义 thumb/列表样式以匹配整体调性。
-    - 下拉/弹出菜单：使用更圆润的角与更柔和的阴影。
-  - 验收：在支持的浏览器中应出现毛玻璃模糊效果；在不支持的内核中应显示更不透明的半透明背景且保持文本可读性。
-
-九、未决与建议改进项
-
-- 更精确的 token 计数：集成 tokenizer 库或请求服务端提供精确计数以替代字符/4 的估算。
-- 流式兼容性：研究是否能通过 Service Worker 与 MessageChannel 更稳健地传递大体量 NDJSON 流，或引入本地小型代理以统一 CORS 与流式处理。
-- 自动化部署：提供可选的 Windows 服务或任务计划脚本以保证 Ollama 在系统启动时以正确环境变量启动，免去手动干预。
-
-如需我把本文件进一步拆分为单独的开发文档（API 参考、架构图、变更日志），或把关键设计决策写成议题便于审阅，我可以继续分步输出。
-- 2025-10-04 11:20:00 - 实现摘要失败回退：当摘要生成失败时，后台会发送 `summaryFailed` 给 popup，popup 在会话中内嵌提示并继续使用完整历史发送请求。
-- 2025-10-04 11:25:00 - 导出/导入：会话导出已包含 `session.summaries` 字段，保证导入后能还原摘要元数据与原始历史。
-- 2025-10-04 11:30:00 - CURSOR.md 与 PRD 文档已同步更新，记录实现细节与审计要求（每次摘要需记录时间戳与覆盖范围）。
- - 2025-10-05 16:10:00 - 新增：支持 Ollama 云 API Key 配置并在请求中添加 Authorization 头
-  - 更改文件：`popup.html`, `popup.js`, `background.js`, `manifest.json`
-  - 目的：允许用户通过扩展直接调用 `https://ollama.com` 云端模型并在请求头中包含 `Authorization: Bearer <API_KEY>`，解决扩展无法读取系统环境变量导致的云端认证问题。
-  - 主要实现：
-    - 在 `popup.html` 的设置面板新增 `Ollama API Key` 输入框（`#ollamaApiKey`），类型为 `password`，并保存到 `chrome.storage.local` 的 `ollamaSettings.apiKey`。
-    - 在 `background.js` 中新增 `buildRequestHeaders(url, extraHeaders)` 工具函数：当目标 host 中包含 `ollama.com` 时，从 `chrome.storage.local` 读取 `ollamaSettings.apiKey` 并在 headers 中加入 `Authorization: Bearer <apiKey>`（若存在）。
-    - 将原有直接使用的 `headers: {'Content-Type': 'application/json'}` 替换为通过 `buildRequestHeaders` 构建的 headers，从而统一处理 cloud 与本地请求。
-    - 在 `manifest.json` 中追加 `host_permissions` 条目：`https://ollama.com/*`，以允许扩展向云端发起请求（用户需要手动重新加载扩展以使权限生效）。
-  - 风险与说明：
-    - API Key 将存储在 `chrome.storage.local`（本地浏览器存储），存在一定风险，请用户仅在可信环境下使用并在不需要时删除。
-    - 日志中不会打印明文 API Key，仅输出是否包含 Authorization 标志以便调试。
-
-# 新增功能记录：模型上下文与 token 统计显示 (2025-10-04)
-
-- 更改文件：`popup.html`、`popup.css`、`popup.js`
-- 目的：在弹出窗口底部显示所选模型的最大上下文长度（若已知），以及当前会话的总 token 数和下一回合发送给模型的预计 token 数。方便用户把控上下文长度与成本。
-- 主要实现：
-  - 在 `popup.html` 添加底部信息栏，包含 `#modelContextValue`、`#totalTokens`、`#nextTurnTokens` 三个元素。
-  - 在 `popup.css` 中添加 `.footer-info`、`.model-context`、`.token-stats` 的样式，保证布局美观且与现有风格协调。
-  - 在 `popup.js` 内：添加 `updateModelContextDisplay()` 函数用于将已知模型名映射到其最大上下文长度并显示；添加 `estimateTokensFromText()` 与 `refreshTokenStats()` 实现简易 token 估算（按空格分词作为占位估算），并在关键交互点（切换模型、输入变化、发送前后）调用刷新。
-- 注意事项：当前 token 估算为简易基于词的估算，仅做相对参考；如果需要精确计数（例如使用特定 tokenizer）可后续集成更精确的 tokenizer 库或在后端由 Ollama/模型服务返回精确计数。
-
-
-## 变更记录（自动追加）
-
-- 2025-10-03 13:00:00 - 修复 `popup.js` 中 `sendMessage` 的持久化顺序问题：
-  - 问题：原实现先将 assistant 占位写入会话再写 user，导致会话内消息顺序不正确（assistant 在 user 之前）。
-  - 变更：调整为在持久化层面先 append user，再 append assistant 占位；UI 渲染仍保持先展示 user 并显示 assistant 占位。相关文件：`popup.js`。
-  - 目的：保证会话中消息顺序为 user -> assistant，避免上下文构建时顺序错误。
-
-- 2025-10-03 13:05:00 - 添加内存级写锁以防止 session index 与单个会话并发写入竞态：
- - 2025-10-03 14:00:00 - 会话管理行为更新：
-   - 变更：在 UI 上禁用发送与新建按钮，直到用户选择模型；将底部“清空对话”按钮替换为“新建会话”并改为在新建前保存当前会话。
-   - 变更：移除在打开插件时自动创建/加载会话的逻辑，改为只有用户在选择模型后自动新建一个会话。
-   - 变更：仅在两处场景自动保存会话（覆盖保存）：用户发送消息后、模型返回完整回复后。其他时机不再触发自动保存。
-   - 相关文件：`popup.html`、`popup.js`
-  - 变更：在 `popup.js` 中增加 `_sessionLocks` 结构与 `_acquireSessionLock` 方法，并在 `saveSession`、`saveSessionIndex`、`createSession`、`deleteSession` 中使用锁保护读写。
-  - 目的：避免并发创建/删除/保存会话时导致索引或会话数据不一致的问题。
-
-- 2025-10-05 15:00:00 - 新增：抓取并发送当前网页正文功能（实现初版）
-  - 更改文件：`manifest.json`（添加 `scripting` 与 `activeTab` 权限）、`popup.html`（新增 `fetchAndSendBtn`）、`popup.js`（添加注入并保存逻辑）、新增 `content_fetch.js`（抓取/清洗页面文本）。
-  - 目的：允许用户在弹窗中一键抓取当前页面正文并将其作为 `user` 消息保存与发送，沿用后台摘要与分段处理逻辑。
-  - 状态：已实现前端注入与抓取脚本，后台分段/摘要逻辑将沿用现有 `prepareMessagesWithSummary`。
-
-- 2025-10-07: 新增“停止生成”按钮以支持中断正在进行的模型回复。
-  - 更改文件：`popup.html`, `sidebar.html`, `popup.js`, `background.js`, `doc/PRD_对话停止按钮_zh.md`
-  - 目的：在用户发送消息后将“发送”按钮替换为“停止”按钮，允许用户在模型返回过程中中断请求，避免等待或浪费资源。取消操作会直接移除未完成的助手占位而不显示额外提示。
-  - 主要实现要点：
-    - 前端：在发送时生成 `requestId` 并隐藏 `sendMessage`，显示 `stopMessageBtn`；收到流式完成或错误后恢复按钮状态。
-    - 后端：为每个 `requestId` 创建 `AbortController` 并在接收到 `abortChat` 消息时调用 `abort()` 中止对应请求；流式片段在中止前可能部分到达，popup 在中止时会移除未完成占位。
-  - 文档：新增 `doc/PRD_对话停止按钮_zh.md` 并在 `CURSOR.md`/`README_zh.md`/`README.md` 中记录变更。
-
-- 2025-10-07 20:00:00: 统一产品名称为 `ChromeChat`，修改文件：`manifest.json`, `popup.html`, `sidebar.html`, `popup.js` (类名), `README.md`, `README_zh.md`, `CURSOR.md`, `doc/PRD_会话管理与上下文_zh.md`。
-
-- 2025-10-07 21:10:00: 在页面右侧添加可点击把手以打开/关闭侧边栏
-  - 更改文件：`content_sidebar_inject.js`, `manifest.json`, `CURSOR.md`
-  - 目的：在任意网页右侧显示一个小把手图标（使用 `icons/icon48.png`），用户点击可快速打开或关闭侧边栏，提升交互发现性。
-  - 主要实现要点：
-    - 在 `content_sidebar_inject.js` 中新增 `createSidebarHandle()`，创建固定在页面右侧中间的把手按钮，点击时调用现有的 `createSidebar()`/`removeSidebar()` 切换侧边栏。
-    - 将 `icons/icon48.png` 加入 `manifest.json` 的 `web_accessible_resources`，以允许把手通过 `chrome.runtime.getURL` 加载图标。
-    - 把手样式在注入脚本中内联设置，确保在大多数网页上不会被页面 CSS 异常覆盖。
-  - 风险与说明：
-    - 个别网站可能存在严格的 CSP 或者对 fixed 元素的样式会被覆盖，若把手未显示可尝试在扩展侧调整样式或提供可选的小脚本对抗特定站点样式。
-    - 把手注入不会修改页面原始 DOM 结构（仅添加顶层固定元素），移除侧边栏时不会移除把手。
-  - 状态：已实现注入逻辑并更新 `manifest.json`。
+变更记录（自动追加）
+- 2025-10-08: 本次草稿由 AI 助手生成，已由用户确认并写入。
